@@ -1,0 +1,23 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    // Driver documents: licence / ID / vehicle reg / photo, namespaced by uid.
+    match /applications/{uid}/{fileName} {
+      allow read: if isOwner(uid) || isAdmin();
+      // Images only, max 10 MB.
+      allow write: if isOwner(uid)
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+  }
+}

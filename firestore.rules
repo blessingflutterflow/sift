@@ -1,0 +1,185 @@
+rules_version = '2';
+
+// HARDENED ruleset (P1). Locks money + completion to the server (Admin SDK).
+//
+// ⚠️ DEPLOY ONLY AFTER the new client build (which completes trips via the
+// `completeRide` callable) is installed on every test device. Old builds write
+// status='completed' directly and these rules forbid that — they would fail to
+// complete a trip. Coordinated swap:
+//   1. Install new APK on all devices.
+//   2. Copy this file over firestore.rules.
+//   3. firebase deploy --only firestore:rules
+//
+// Known residual vector (deferred to hardening): the driver still writes the
+// `arrived`/`startedAt` timestamps the waiting-fee is computed from. Moving
+// those milestones to callables makes the waiting fee unforgeable.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    // users/{uid} — profile + role; status is server/admin-only.
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid)
+        && request.resource.data.status == resource.data.status;
+      allow write: if isAdmin();
+
+      // Saved places (Home/Work/custom) — purely the owner's data.
+      match /places/{placeId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // Vaulted cards: only the webhook (Admin SDK) creates them — the raw
+      // card never passes through the client. The owner may read, pick a
+      // default, or remove a card.
+      match /payment_methods/{methodId} {
+        allow read: if isOwner(uid) || isAdmin();
+        allow update: if isOwner(uid)
+          && changedKeys().hasOnly(['isDefault']);
+        allow delete: if isOwner(uid);
+        allow write: if isAdmin();
+      }
+    }
+
+    // applications/{uid} — driver onboarding; approve/reject is admin/server.
+    match /applications/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create, update: if isOwner(uid)
+        && request.resource.data.status == 'pending';
+      allow write: if isAdmin();
+    }
+
+    // driver_locations/{uid} — live GPS the driver writes while online.
+    match /driver_locations/{uid} {
+      allow read: if isAdmin();
+      allow write: if isOwner(uid);
+    }
+
+    // rides/{rideId} — shared ride contract.
+    //
+    //  • create: rider opens their own request (server overrides money fields).
+    //  • driver update: only their assigned ride, only the live-trip fields,
+    //      and never status='completed' (that's the completeRide callable).
+    //  • rider update: only their own rating. Cancel/accept/complete are
+    //      server callables (Admin SDK, rules bypassed).
+    //  • all money fields (fare/finalFare/commission/…/paymentStatus) are
+    //      writable by Admin SDK / admins only — clients can't touch them.
+    match /rides/{rideId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.riderId == request.auth.uid
+        && request.resource.data.status in ['requested', 'scheduled'];
+
+      allow update: if isSignedIn() && (
+        (
+          resource.data.driverId == request.auth.uid
+          && changedKeys().hasOnly([
+               'status', 'arrivedAt', 'startedAt',
+               'driverLat', 'driverLng', 'driverHeading',
+               'driverSpeedKmh', 'driverUpdatedAt', 'driverRating'
+             ])
+          // Status transitions are limited to the live-trip set; writes that
+          // don't touch status (telemetry, post-trip rating) skip the check.
+          && (
+            !changedKeys().hasAny(['status'])
+            || request.resource.data.status in
+                 ['accepted', 'arriving', 'arrived', 'in_progress']
+          )
+        ) || (
+          resource.data.riderId == request.auth.uid
+          && changedKeys().hasOnly(['riderRating'])
+        )
+      );
+
+      allow write: if isAdmin();
+
+      // rides/{rideId}/messages — rider ↔ driver chat. Sender must be a party
+      // to the ride and the trip must be live; messages are immutable.
+      match /messages/{messageId} {
+        function rideData() {
+          return get(/databases/$(database)/documents/rides/$(rideId)).data;
+        }
+        allow read: if isSignedIn()
+          && (rideData().riderId == request.auth.uid
+              || rideData().driverId == request.auth.uid
+              || isAdmin());
+        allow create: if isSignedIn()
+          && request.resource.data.senderId == request.auth.uid
+          && (rideData().riderId == request.auth.uid
+              || rideData().driverId == request.auth.uid)
+          && rideData().status in ['accepted', 'arriving', 'arrived', 'in_progress']
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 500
+          && request.resource.data.keys()
+               .hasOnly(['senderId', 'senderRole', 'text', 'createdAt']);
+      }
+    }
+
+    // wallets/{uid} (+ entries) — rider prepaid balance. Server-written only
+    // (top-ups credited by the Paystack webhook, rides debited by completeRide).
+    match /wallets/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if isAdmin();
+      match /entries/{entryId} {
+        allow read: if isOwner(uid) || isAdmin();
+        allow write: if isAdmin();
+      }
+    }
+
+    // ledgers/{uid} (+ entries) — driver earnings/debt. Server-written only.
+    match /ledgers/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if isAdmin();
+      match /entries/{entryId} {
+        allow read: if isOwner(uid) || isAdmin();
+        allow write: if isAdmin();
+      }
+    }
+
+    // transactions/{ref} — Paystack charges/refunds (P2). Server-written only.
+    match /transactions/{ref} {
+      allow read: if isAdmin()
+        || (isSignedIn() && resource.data.riderId == request.auth.uid)
+        || (isSignedIn() && resource.data.driverId == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    // config/{doc} — pricing etc. Readable by signed-in clients (fare preview),
+    // writable by admins only.
+    match /config/{doc} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // zones/{id} — surge zones. Readable by signed-in clients (surge preview),
+    // managed by admins only.
+    match /zones/{zoneId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // otp_throttle/{phone} — server-only rate-limit state (Admin SDK).
+    match /otp_throttle/{phone} {
+      allow read, write: if false;
+    }
+  }
+}

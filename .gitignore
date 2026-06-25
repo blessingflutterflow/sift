@@ -1,0 +1,47 @@
+# Flutter / Dart
+**/build/
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/.pub-cache/
+**/.pub/
+*.iml
+.idea/
+
+# Android
+**/android/.gradle/
+**/android/captures/
+**/android/local.properties
+**/android/key.properties
+**/*.keystore
+**/*.jks
+
+# iOS / macOS
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/macos/Pods/
+**/.symlinks/
+**/Flutter/ephemeral/
+**/xcuserdata/
+
+# Firebase / secrets
+**/google-services.json
+**/GoogleService-Info.plist
+**/serviceAccountKey*.json
+.firebase/
+*.log
+
+# Node (functions, admin)
+**/node_modules/
+**/npm-debug.log*
+
+# Misc
+.DS_Store
+_screen.png
+_flutter_run.log
+
+# sift_admin is its own repo (github.com/blessingflutterflow/sift-admin)
+sift_admin/
