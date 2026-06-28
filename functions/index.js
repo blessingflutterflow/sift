@@ -178,3 +178,6 @@ Object.assign(exports, require("./receipts"));
 
 // In-app chat push (notify the other party of new messages).
 Object.assign(exports, require("./chat"));
+
+// Parcel delivery (multi-stop dispatch, POD, settlement).
+Object.assign(exports, require("./parcels"));

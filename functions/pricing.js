@@ -15,7 +15,7 @@ const DEFAULTS = {
   fareBase: 30,
   farePerKm: 5,
   farePerMin: 0,
-  tierMultipliers: { go: 1.0, xl: 1.45, max: 1.9 },
+  tierMultipliers: { bike: 0.7, go: 1.0, xl: 1.45, max: 1.9 },
   commissionPct: 0.2,
   waitFreeMin: 5,
   waitPerMin: 1.5,

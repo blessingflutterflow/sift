@@ -19,5 +19,15 @@ service firebase.storage {
         && request.resource.size < 10 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
+
+    // Parcel proof-of-delivery (photo + signature). The assigned driver uploads;
+    // the recorded URLs are validated server-side by deliverParcelStop. Readable
+    // by any signed-in user (sender + driver + admin view the POD).
+    match /parcels/{parcelId}/pod/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
   }
 }

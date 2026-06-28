@@ -47,6 +47,14 @@ class RideTier {
 /// matching `assets/cars/{id}.png` art is added.
 const List<RideTier> kRideTiers = [
   RideTier(
+    id: 'bike',
+    name: 'Sift Bike',
+    etaMin: 2,
+    seats: 1,
+    multiplier: 0.7,
+    icon: Icons.two_wheeler,
+  ),
+  RideTier(
     id: 'go',
     name: 'Sift Go',
     etaMin: 3,

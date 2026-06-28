@@ -82,6 +82,7 @@ async function handleChargeSuccess(data) {
   if (purpose === "debt") return settleDebtPayment(data);
   if (purpose === "driver_debt") return settleDriverDebt(data);
   if (purpose === "wallet_topup") return settleWalletTopup(data);
+  if (purpose === "parcel") return settleParcelCharge(data);
   logger.info("charge.success ignored (no/unknown purpose)", {
     reference: data.reference,
     purpose,
@@ -242,6 +243,57 @@ async function settleTripCharge(data) {
         balanceDelta: 0,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+    }
+  });
+}
+
+/** Confirm a parcel's card charge: mark paid, record txn + driver earning. */
+async function settleParcelCharge(data) {
+  const parcelId = data.metadata?.parcelId;
+  if (!parcelId) return;
+  const cfg = await readPricing();
+  const ref = db().collection("parcels").doc(parcelId);
+
+  await db().runTransaction(async (txn) => {
+    const s = await txn.get(ref);
+    const r = s.data();
+    if (!r) return;
+    const finalFare = paystack.toZar(data.amount);
+    const { commission, driverEarning } = splitFare(finalFare, cfg);
+
+    txn.update(ref, {
+      paymentStatus: "paid",
+      paidAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    txn.set(db().collection("transactions").doc(data.reference), {
+      reference: data.reference,
+      parcelId,
+      riderId: r.senderId,
+      driverId: r.driverId || null,
+      amount: finalFare,
+      commission,
+      driverEarning,
+      method: "card",
+      channel: data.channel || "card",
+      type: "parcel",
+      status: "success",
+      subaccountSettled: !!data.subaccount,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    if (r.driverId) {
+      txn.set(
+        db().collection("ledgers").doc(r.driverId).collection("entries").doc(),
+        {
+          type: "parcel_earning_card",
+          parcelId,
+          method: "card",
+          finalFare,
+          commission,
+          driverEarning,
+          balanceDelta: 0,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        }
+      );
     }
   });
 }

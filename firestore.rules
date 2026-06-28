@@ -134,6 +134,22 @@ service cloud.firestore {
       }
     }
 
+    // parcels/{parcelId} — multi-stop parcel delivery. Sender opens the request;
+    // the driver may only mirror live telemetry. Status, stops/POD and all money
+    // fields are written by the Cloud Functions (Admin SDK) / admins only.
+    match /parcels/{parcelId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.status == 'requested';
+      allow update: if isSignedIn()
+        && resource.data.driverId == request.auth.uid
+        && changedKeys().hasOnly([
+             'driverLat', 'driverLng', 'driverHeading', 'driverUpdatedAt'
+           ]);
+      allow write: if isAdmin();
+    }
+
     // wallets/{uid} (+ entries) — rider prepaid balance. Server-written only
     // (top-ups credited by the Paystack webhook, rides debited by completeRide).
     match /wallets/{uid} {

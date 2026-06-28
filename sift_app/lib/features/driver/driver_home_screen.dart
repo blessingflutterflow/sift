@@ -9,7 +9,9 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../../core/router/app_router.dart';
 import '../../core/theme/app_colors.dart';
+import '../../data/models/parcel.dart';
 import '../../data/models/ride.dart';
+import '../../data/repositories/parcel_repository.dart';
 import '../../data/repositories/ride_repository.dart';
 import '../../data/services/driver_location_service.dart';
 import '../../data/services/notification_service.dart';
@@ -30,8 +32,11 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
   bool _online = false;
   bool _accepting = false;
   Ride? _offer;
+  Parcel? _parcelOffer;
   StreamSubscription<List<Ride>>? _offerSub;
   StreamSubscription<List<Ride>>? _activeSub;
+  StreamSubscription<List<Parcel>>? _parcelOfferSub;
+  StreamSubscription<List<Parcel>>? _parcelActiveSub;
   Timer? _tick; // 1s ticker to animate the offer countdown
 
   static const CameraPosition _fallback = CameraPosition(
@@ -130,12 +135,25 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
       _activeSub = repo.watchDriverActive(uid).listen((active) {
         if (active.isNotEmpty) _goToTrip(active.first.id);
       });
+      // Parcel jobs are offered + resumed the same way as rides.
+      final parcelRepo = ref.read(parcelRepositoryProvider);
+      _parcelOfferSub = parcelRepo.watchOffersFor(uid).listen((offers) {
+        setState(() => _parcelOffer = offers.isNotEmpty ? offers.first : null);
+      });
+      _parcelActiveSub = parcelRepo.watchDriverActive(uid).listen((active) {
+        if (active.isNotEmpty) _goToParcel(active.first.id);
+      });
     } else {
       _offerSub?.cancel();
       _activeSub?.cancel();
+      _parcelOfferSub?.cancel();
+      _parcelActiveSub?.cancel();
       _tick?.cancel();
       _tick = null;
-      setState(() => _offer = null);
+      setState(() {
+        _offer = null;
+        _parcelOffer = null;
+      });
       await service.goOffline(uid);
     }
   }
@@ -151,6 +169,43 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
     context.push(AppRouter.driverTrip, extra: rideId).whenComplete(() {
       _onTripScreen = false;
     });
+  }
+
+  bool _onParcelScreen = false;
+
+  void _goToParcel(String parcelId) {
+    if (_onParcelScreen || !mounted) return;
+    _onParcelScreen = true;
+    context.push(AppRouter.parcelDelivery, extra: parcelId).whenComplete(() {
+      _onParcelScreen = false;
+    });
+  }
+
+  Future<void> _acceptParcel(Parcel offer) async {
+    setState(() => _accepting = true);
+    try {
+      await ref.read(parcelRepositoryProvider).accept(offer.id);
+      if (mounted) {
+        setState(() => _parcelOffer = null);
+        _goToParcel(offer.id);
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('That parcel was already taken.')),
+        );
+        setState(() => _parcelOffer = null);
+      }
+    } finally {
+      if (mounted) setState(() => _accepting = false);
+    }
+  }
+
+  Future<void> _declineParcel(Parcel offer) async {
+    setState(() => _parcelOffer = null);
+    try {
+      await ref.read(parcelRepositoryProvider).decline(offer.id);
+    } catch (_) {}
   }
 
   Future<void> _accept(Ride offer) async {
@@ -184,6 +239,8 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
   void dispose() {
     _offerSub?.cancel();
     _activeSub?.cancel();
+    _parcelOfferSub?.cancel();
+    _parcelActiveSub?.cancel();
     _tick?.cancel();
     final uid = ref.read(sessionProvider).uid;
     if (uid != null && _online) {
@@ -361,7 +418,11 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (offer == null)
+        if (offer != null)
+          _offerCard(offer)
+        else if (_parcelOffer != null)
+          _parcelOfferCard(_parcelOffer!)
+        else
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 18),
             child: Row(
@@ -373,14 +434,12 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
                       strokeWidth: 2.5, color: AppColors.green),
                 ),
                 SizedBox(width: 14),
-                Text('Waiting for ride requests…',
+                Text('Waiting for requests…',
                     style: TextStyle(
                         fontSize: 16, fontWeight: FontWeight.w600)),
               ],
             ),
-          )
-        else
-          _offerCard(offer),
+          ),
         const SizedBox(height: 8),
         Center(
           child: TextButton(
@@ -416,6 +475,78 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
                   fontSize: 15, fontWeight: FontWeight.w800)),
         ],
       ),
+    );
+  }
+
+  Widget _parcelOfferCard(Parcel offer) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.local_shipping_outlined,
+                color: AppColors.green, size: 22),
+            const SizedBox(width: 8),
+            const Text('Parcel delivery',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+            const Spacer(),
+            Text('R${offer.fare.toStringAsFixed(0)}',
+                style:
+                    const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+            '${offer.stops.length} drop-off${offer.stops.length == 1 ? '' : 's'} · ${offer.distanceKm.toStringAsFixed(1)} km',
+            style: const TextStyle(color: AppColors.muted)),
+        const SizedBox(height: 4),
+        Text('Pickup: ${offer.pickupAddress}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 13, color: AppColors.muted)),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: _accepting ? null : () => _declineParcel(offer),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.muted,
+                  side: const BorderSide(color: AppColors.line),
+                  minimumSize: const Size(0, 52),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(26)),
+                ),
+                child: const Text('Decline'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 2,
+              child: ElevatedButton(
+                onPressed: _accepting ? null : () => _acceptParcel(offer),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.green,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  minimumSize: const Size(0, 52),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(26)),
+                ),
+                child: _accepting
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2.5, color: Colors.white))
+                    : const Text('Accept delivery',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w800)),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 

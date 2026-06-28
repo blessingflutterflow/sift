@@ -254,6 +254,34 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
             ),
           ),
+          const SizedBox(height: 10),
+          // Send a parcel
+          GestureDetector(
+            onTap: () => context.push(AppRouter.sendParcel),
+            child: Container(
+              height: 54,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              decoration: BoxDecoration(
+                color: AppColors.selectedFill,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.local_shipping_outlined,
+                      size: 24, color: AppColors.green),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Text('Send a parcel',
+                        style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.green)),
+                  ),
+                  Icon(Icons.chevron_right, size: 22, color: AppColors.green),
+                ],
+              ),
+            ),
+          ),
           const SizedBox(height: 8),
           ..._quickPlaces(),
         ],

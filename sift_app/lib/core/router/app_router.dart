@@ -23,6 +23,9 @@ import '../../features/auth/update_required_screen.dart';
 import '../../features/history/receipt_screen.dart';
 import '../../features/history/trip_history_screen.dart';
 import '../../features/onboarding/verification_screen.dart';
+import '../../features/parcel/parcel_delivery_screen.dart';
+import '../../features/parcel/parcel_tracking_screen.dart';
+import '../../features/parcel/send_parcel_screen.dart';
 import '../../features/trip/trip_follow_screen.dart';
 import '../../features/payments/payment_methods_screen.dart';
 import '../../features/wallet/wallet_screen.dart';
@@ -70,6 +73,11 @@ class AppRouter {
 
   // In-app rider ↔ driver chat
   static const String chat = '/chat';
+
+  // Parcel delivery
+  static const String sendParcel = '/parcel/send';
+  static const String parcelTracking = '/parcel/track';
+  static const String parcelDelivery = '/parcel/deliver';
 
   // Account
   static const String updateRequired = '/update';
@@ -119,6 +127,17 @@ class AppRouter {
         path: follow,
         builder: (context, state) =>
             TripFollowScreen(rideId: state.extra as String? ?? ''),
+      ),
+      _route(sendParcel, const SendParcelScreen()),
+      GoRoute(
+        path: parcelTracking,
+        builder: (context, state) =>
+            ParcelTrackingScreen(parcelId: state.extra as String? ?? ''),
+      ),
+      GoRoute(
+        path: parcelDelivery,
+        builder: (context, state) =>
+            ParcelDeliveryScreen(parcelId: state.extra as String? ?? ''),
       ),
       GoRoute(
         path: chat,

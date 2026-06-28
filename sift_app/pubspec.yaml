@@ -78,6 +78,9 @@ dependencies:
   flutter_chat_ui: ^2.11.1
   flutter_chat_core: ^2.9.0
 
+  # Signature pad for parcel proof-of-delivery
+  signature: ^5.5.0
+
   # In-app voice calling (VoIP over data — no phone number/paperwork)
   zego_uikit_prebuilt_call: ^4.24.2
   zego_uikit_signaling_plugin: ^2.8.10
