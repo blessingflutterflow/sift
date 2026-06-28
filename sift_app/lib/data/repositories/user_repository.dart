@@ -46,6 +46,14 @@ class UserRepository {
           (d) => ApprovalStatus.fromName(d.data()?['status'] as String?),
         );
   }
+
+  /// Live rider identity-verification status (unverified/pending/approved/
+  /// rejected) — the verification + review screens react to this.
+  Stream<String> watchVerification(String uid) {
+    return _users.doc(uid).snapshots().map(
+          (d) => (d.data()?['verificationStatus'] as String?) ?? 'unverified',
+        );
+  }
 }
 
 /// Lightweight read model for a user document.
@@ -56,6 +64,7 @@ class SessionSnapshot {
     required this.name,
     required this.email,
     required this.status,
+    required this.verificationStatus,
   });
 
   final String phone;
@@ -63,6 +72,9 @@ class SessionSnapshot {
   final String name;
   final String email;
   final ApprovalStatus status;
+
+  /// Rider identity verification: unverified | pending | approved | rejected.
+  final String verificationStatus;
 
   factory SessionSnapshot.fromMap(Map<String, dynamic> map) {
     final roleName = map['role'] as String?;
@@ -76,6 +88,8 @@ class SessionSnapshot {
       name: (map['name'] as String?) ?? '',
       email: (map['email'] as String?) ?? '',
       status: ApprovalStatus.fromName(map['status'] as String?),
+      verificationStatus:
+          (map['verificationStatus'] as String?) ?? 'unverified',
     );
   }
 }

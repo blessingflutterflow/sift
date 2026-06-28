@@ -86,11 +86,28 @@ class ReceiptScreen extends ConsumerWidget {
             _line('Payment', _paymentLabel(r)),
             if (isDriver) ...[
               const Divider(height: 22, color: AppColors.line),
-              _line('Service fee (Sift)',
-                  '- R${(r.commission ?? 0).toStringAsFixed(2)}'),
-              _line('Your earning',
-                  'R${(r.driverEarning ?? 0).toStringAsFixed(2)}',
-                  bold: true, green: true),
+              if (r.paymentMethod == 'cash') ...[
+                // Cash: the driver already holds the full fare; the commission
+                // is a debt, not money taken from them now.
+                _line('Cash collected from rider',
+                    'R${r.displayFare.toStringAsFixed(2)}'),
+                _line('Commission owed to Sift',
+                    '- R${(r.commission ?? 0).toStringAsFixed(2)}'),
+                _line('Your earning',
+                    'R${(r.driverEarning ?? 0).toStringAsFixed(2)}',
+                    bold: true, green: true),
+                const SizedBox(height: 6),
+                const Text(
+                    'You kept the full cash. The commission is added to your '
+                    'Sift balance to settle in the app.',
+                    style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
+              ] else ...[
+                _line('Service fee (Sift)',
+                    '- R${(r.commission ?? 0).toStringAsFixed(2)}'),
+                _line('Your earning',
+                    'R${(r.driverEarning ?? 0).toStringAsFixed(2)}',
+                    bold: true, green: true),
+              ],
             ],
           ],
           const SizedBox(height: 22),

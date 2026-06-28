@@ -34,7 +34,12 @@ Future<String> resolvePostAuthDestination(WidgetRef ref, String uid) async {
   // Start listening for in-app calls (rider ↔ driver) for this user.
   unawaited(ref.read(callServiceProvider).init(uid, snap.name));
 
-  if (snap.role == UserRole.rider) return AppRouter.home;
+  // Riders must pass identity verification (ID + face) before riding.
+  if (snap.role == UserRole.rider) {
+    return snap.verificationStatus == 'approved'
+        ? AppRouter.home
+        : AppRouter.riderVerification;
+  }
 
   // Driver — route by their application status.
   final appStatus =

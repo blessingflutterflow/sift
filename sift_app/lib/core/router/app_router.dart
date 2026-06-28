@@ -17,6 +17,7 @@ import '../../features/onboarding/status/rejected_screen.dart';
 import '../../features/onboarding/welcome/onboarding_carousel_screen.dart';
 import '../../data/models/ride.dart';
 import '../../features/auth/biometric_lock_screen.dart';
+import '../../features/auth/rider_verification_screen.dart';
 import '../../features/chat/chat_screen.dart';
 import '../../features/auth/edit_profile_screen.dart';
 import '../../features/auth/update_required_screen.dart';
@@ -56,6 +57,7 @@ class AppRouter {
   static const String otp = '/otp';
   static const String roleSelect = '/role';
   static const String profile = '/profile';
+  static const String riderVerification = '/rider/verify';
   static const String home = '/home';
 
   // Rider ride-request flow
@@ -113,6 +115,7 @@ class AppRouter {
       _route(otp, const OtpScreen()),
       _route(roleSelect, const RoleSelectScreen()),
       _route(profile, const ProfileSetupScreen()),
+      _route(riderVerification, const RiderVerificationScreen()),
       _route(home, const HomeScreen()),
       _route(destination, const DestinationScreen()),
       GoRoute(

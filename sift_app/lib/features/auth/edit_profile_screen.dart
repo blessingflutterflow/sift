@@ -6,7 +6,8 @@ import '../../core/theme/app_colors.dart';
 import '../../data/repositories/user_repository.dart';
 import 'session_controller.dart';
 
-/// Edit name + email (phone is the sign-in identity and stays fixed).
+/// Edit email only — name and phone are fixed (name is tied to identity/KYC,
+/// phone is the sign-in identity).
 class EditProfileScreen extends ConsumerStatefulWidget {
   const EditProfileScreen({super.key});
 
@@ -15,7 +16,6 @@ class EditProfileScreen extends ConsumerStatefulWidget {
 }
 
 class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
-  late final TextEditingController _name;
   late final TextEditingController _email;
   bool _saving = false;
 
@@ -23,13 +23,11 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   void initState() {
     super.initState();
     final s = ref.read(sessionProvider);
-    _name = TextEditingController(text: s.name);
     _email = TextEditingController(text: s.email);
   }
 
   @override
   void dispose() {
-    _name.dispose();
     _email.dispose();
     super.dispose();
   }
@@ -39,9 +37,8 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     final uid = s.uid;
     final role = s.role;
     if (uid == null || role == null) return;
-    final name = _name.text.trim();
+    final name = s.name; // name is fixed — not editable
     final email = _email.text.trim();
-    if (name.isEmpty) return;
     if (email.isNotEmpty &&
         !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -100,7 +97,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         children: [
           _label('Full name'),
-          _field(_name, hint: 'Your name', keyboard: TextInputType.name),
+          _readOnly(s.name.isEmpty ? '—' : s.name),
+          const SizedBox(height: 6),
+          const Text("Your name is fixed and can't be changed here.",
+              style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
           const SizedBox(height: 16),
           _label('Email'),
           _field(_email,
@@ -151,6 +151,18 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       ),
     );
   }
+
+  Widget _readOnly(String value) => Container(
+        height: 54,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        alignment: Alignment.centerLeft,
+        decoration: BoxDecoration(
+          color: AppColors.field,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(value,
+            style: const TextStyle(fontSize: 16, color: AppColors.muted)),
+      );
 
   Widget _label(String text) => Padding(
         padding: const EdgeInsets.only(bottom: 6),

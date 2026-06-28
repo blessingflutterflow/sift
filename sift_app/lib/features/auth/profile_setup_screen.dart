@@ -58,7 +58,10 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
     }
 
     if (mounted) {
-      context.go(s.isDriver ? AppRouter.driverDocuments : AppRouter.home);
+      // Riders go straight to identity verification before they can ride.
+      context.go(s.isDriver
+          ? AppRouter.driverDocuments
+          : AppRouter.riderVerification);
     }
   }
 

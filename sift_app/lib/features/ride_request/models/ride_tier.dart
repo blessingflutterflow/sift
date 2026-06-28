@@ -14,6 +14,7 @@ class RideTier {
     required this.icon,
     this.badge,
     this.range = false,
+    this.seatsText,
   });
 
   final String id;
@@ -24,6 +25,13 @@ class RideTier {
   final IconData icon; // placeholder until car PNGs land
   final IconData? badge;
   final bool range; // show a price range (e.g. Black Cab)
+
+  /// Optional override for the seat label (e.g. a "4–7 seats" range).
+  final String? seatsText;
+
+  /// What to show under the tier name for seating.
+  String get seatsLabel =>
+      seatsText ?? '$seats seat${seats == 1 ? '' : 's'}';
 
   /// Numeric fare for a trip distance (ZAR).
   double fareValue(double distanceKm) =>
@@ -58,7 +66,7 @@ const List<RideTier> kRideTiers = [
     id: 'go',
     name: 'Sift Go',
     etaMin: 3,
-    seats: 4,
+    seats: 2,
     multiplier: 1.0,
     icon: Icons.directions_car,
   ),
@@ -69,10 +77,12 @@ const List<RideTier> kRideTiers = [
     seats: 6,
     multiplier: 1.45,
     icon: Icons.airport_shuttle,
+    seatsText: '4–7 seats',
   ),
   RideTier(
+    // id stays 'max' so pricing/data are unchanged; display name only.
     id: 'max',
-    name: 'Sift Max',
+    name: 'Sift Premium',
     etaMin: 8,
     seats: 7,
     multiplier: 1.9,

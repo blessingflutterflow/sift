@@ -25,6 +25,18 @@ class StorageService {
     return ref.getDownloadURL();
   }
 
+  /// Rider identity verification image (`id` or `selfie`) → Storage path the
+  /// `verifyRiderIdentity` function reads. Returns the download URL.
+  Future<String> uploadVerification({
+    required String uid,
+    required String kind, // 'id' | 'selfie'
+    required File file,
+  }) async {
+    final ref = _storage.ref('verifications/$uid/$kind.jpg');
+    await ref.putFile(file, SettableMetadata(contentType: 'image/jpeg'));
+    return ref.getDownloadURL();
+  }
+
   /// Proof-of-delivery photo for one parcel stop → download URL.
   Future<String> uploadParcelPhoto({
     required String parcelId,

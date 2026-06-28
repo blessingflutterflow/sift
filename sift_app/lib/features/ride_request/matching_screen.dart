@@ -355,6 +355,7 @@ class _MatchingScreenState extends ConsumerState<MatchingScreen>
                 target: _targetFor(ride) ?? ride.pickup,
                 route: _progress?.remainingPath ?? const [],
                 targetIsDestination: ride.status == RideStatus.inProgress,
+                vehicleIsBike: ride.tierId == 'bike',
               ),
             ),
 

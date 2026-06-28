@@ -181,3 +181,6 @@ Object.assign(exports, require("./chat"));
 
 // Parcel delivery (multi-stop dispatch, POD, settlement).
 Object.assign(exports, require("./parcels"));
+
+// Rider identity verification (AWS Rekognition face match).
+Object.assign(exports, require("./faceVerify"));

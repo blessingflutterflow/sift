@@ -38,7 +38,13 @@ service cloud.firestore {
       allow read: if isOwner(uid) || isAdmin();
       allow create: if isOwner(uid);
       allow update: if isOwner(uid)
-        && request.resource.data.status == resource.data.status;
+        && request.resource.data.status == resource.data.status
+        // Identity verification is server/admin-controlled — riders can't
+        // approve themselves.
+        && request.resource.data.get('verificationStatus', '')
+             == resource.data.get('verificationStatus', '')
+        && request.resource.data.get('faceMatchScore', 0)
+             == resource.data.get('faceMatchScore', 0);
       allow write: if isAdmin();
 
       // Saved places (Home/Work/custom) — purely the owner's data.

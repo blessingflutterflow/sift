@@ -11,6 +11,7 @@ class MapMarkers {
   MapMarkers._();
 
   static BitmapDescriptor? car;
+  static BitmapDescriptor? bike;
   static BitmapDescriptor? person;
   static BitmapDescriptor? bubble;
   static BitmapDescriptor? flag;
@@ -20,6 +21,10 @@ class MapMarkers {
     if (_loaded) return;
     _loaded = true;
     car = await _asset('assets/markers/car.png', 46) ?? await _drawnCar();
+    // Bike marker — reuses the Sift Bike art; falls back to the car marker.
+    bike = await _asset('assets/markers/bike.png', 46) ??
+        await _asset('assets/cars/bike.png', 46) ??
+        car;
     person =
         await _asset('assets/markers/person.png', 42) ?? await _drawnPerson();
     bubble = await _drawnBubble();

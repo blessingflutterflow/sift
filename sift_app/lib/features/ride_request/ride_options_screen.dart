@@ -398,6 +398,21 @@ class _RideOptionsScreenState extends ConsumerState<RideOptionsScreen> {
               borderRadius: BorderRadius.circular(10),
             ),
           ),
+          if (km > 0)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 2, 16, 6),
+              child: Row(
+                children: [
+                  const Icon(Icons.straighten, size: 16, color: AppColors.muted),
+                  const SizedBox(width: 6),
+                  Text('${km.toStringAsFixed(1)} km trip',
+                      style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.muted)),
+                ],
+              ),
+            ),
           if (_surge > 1.0) _surgeBadge(),
           Expanded(
             child: ListView.builder(
@@ -471,7 +486,7 @@ class _RideOptionsScreenState extends ConsumerState<RideOptionsScreen> {
                   Text(t.name,
                       style: const TextStyle(
                           fontSize: 19, fontWeight: FontWeight.w800)),
-                  Text('${t.etaMin} min  ·  ${t.seats} seats',
+                  Text('${t.etaMin} min  ·  ${t.seatsLabel}',
                       style: const TextStyle(
                           fontSize: 14, color: Color(0xFF73757F))),
                 ],

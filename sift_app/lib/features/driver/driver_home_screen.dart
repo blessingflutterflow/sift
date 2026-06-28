@@ -17,6 +17,7 @@ import '../../data/services/driver_location_service.dart';
 import '../../data/services/notification_service.dart';
 import '../auth/account_menu.dart';
 import '../auth/session_controller.dart';
+import '../ride_request/widgets/map_markers.dart';
 
 /// Driver home — map with an online/offline toggle. When online, a mock ride
 /// request appears. UI-only.
@@ -44,10 +45,29 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
     zoom: 15,
   );
 
+  // The driver's own live position, shown as a car on the map.
+  LatLng? _myPos;
+  double _myHeading = 0;
+  StreamSubscription<Position>? _posSub;
+
   @override
   void initState() {
     super.initState();
     _centerOnCurrentPosition();
+    MapMarkers.ensureLoaded().then((_) {
+      if (mounted) setState(() {});
+    });
+    // Follow the driver's position so their car marker tracks them.
+    _posSub = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high, distanceFilter: 8),
+    ).listen((pos) {
+      if (!mounted) return;
+      setState(() {
+        _myPos = LatLng(pos.latitude, pos.longitude);
+        if (pos.heading >= 0) _myHeading = pos.heading;
+      });
+    });
     // Idempotent: stores this device's FCM token so ride offers arrive even
     // when the app is backgrounded.
     final uid = ref.read(sessionProvider).uid;
@@ -235,12 +255,29 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
     } catch (_) {}
   }
 
+  /// The driver's own vehicle as a car marker at their live position.
+  Set<Marker> _myCarMarker() {
+    final pos = _myPos;
+    if (pos == null || MapMarkers.car == null) return const {};
+    return {
+      Marker(
+        markerId: const MarkerId('me'),
+        position: pos,
+        icon: MapMarkers.car!,
+        rotation: _myHeading,
+        anchor: const Offset(0.5, 0.5),
+        flat: true,
+      ),
+    };
+  }
+
   @override
   void dispose() {
     _offerSub?.cancel();
     _activeSub?.cancel();
     _parcelOfferSub?.cancel();
     _parcelActiveSub?.cancel();
+    _posSub?.cancel();
     _tick?.cancel();
     final uid = ref.read(sessionProvider).uid;
     if (uid != null && _online) {
@@ -277,10 +314,12 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
           Positioned.fill(
             child: GoogleMap(
               initialCameraPosition: _fallback,
-              myLocationEnabled: true,
+              // Show the driver's own car marker instead of the blue dot.
+              myLocationEnabled: false,
               myLocationButtonEnabled: false,
               zoomControlsEnabled: false,
               compassEnabled: false,
+              markers: _myCarMarker(),
               onMapCreated: (c) {
                 _controller = c;
                 _centerOnCurrentPosition();

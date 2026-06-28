@@ -20,6 +20,15 @@ service firebase.storage {
         && request.resource.contentType.matches('image/.*');
     }
 
+    // Rider identity verification (ID + selfie). Owner uploads; the
+    // verifyRiderIdentity function reads them server-side.
+    match /verifications/{uid}/{fileName} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if isOwner(uid)
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
     // Parcel proof-of-delivery (photo + signature). The assigned driver uploads;
     // the recorded URLs are validated server-side by deliverParcelStop. Readable
     // by any signed-in user (sender + driver + admin view the POD).
