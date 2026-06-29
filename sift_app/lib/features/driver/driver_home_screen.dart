@@ -11,6 +11,7 @@ import '../../core/router/app_router.dart';
 import '../../core/theme/app_colors.dart';
 import '../../data/models/parcel.dart';
 import '../../data/models/ride.dart';
+import '../../data/repositories/ledger_repository.dart';
 import '../../data/repositories/parcel_repository.dart';
 import '../../data/repositories/ride_repository.dart';
 import '../../data/services/driver_location_service.dart';
@@ -50,6 +51,10 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
   double _myHeading = 0;
   StreamSubscription<Position>? _posSub;
 
+  // Today's earnings, shown in the top pill.
+  double _todayEarnings = 0;
+  StreamSubscription<List<LedgerEntry>>? _ledgerSub;
+
   @override
   void initState() {
     super.initState();
@@ -73,6 +78,23 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
     final uid = ref.read(sessionProvider).uid;
     if (uid != null) {
       ref.read(notificationServiceProvider).register(uid);
+      // Today's earnings for the top pill — sum of trip/parcel earnings dated
+      // today across the driver's ledger.
+      _ledgerSub =
+          ref.read(ledgerRepositoryProvider).watchEntries(uid).listen((entries) {
+        final now = DateTime.now();
+        double total = 0;
+        for (final e in entries) {
+          final t = e.createdAt;
+          if (t != null &&
+              t.year == now.year &&
+              t.month == now.month &&
+              t.day == now.day) {
+            total += e.driverEarning ?? 0;
+          }
+        }
+        if (mounted) setState(() => _todayEarnings = total);
+      });
     }
   }
 
@@ -278,6 +300,7 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
     _parcelOfferSub?.cancel();
     _parcelActiveSub?.cancel();
     _posSub?.cancel();
+    _ledgerSub?.cancel();
     _tick?.cancel();
     final uid = ref.read(sessionProvider).uid;
     if (uid != null && _online) {
@@ -366,9 +389,10 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
     );
   }
 
+  /// Top pill — today's earnings (with a small online/offline status dot).
   Widget _statusPill() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
@@ -376,22 +400,31 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
           BoxShadow(color: Color(0x1A000000), blurRadius: 12, offset: Offset(0, 3)),
         ],
       ),
-      child: Row(
+      child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(
-              color: _online ? AppColors.green : AppColors.muted,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 8),
           Text(
-            _online ? "You're online" : "You're offline",
+            'R ${_todayEarnings.toStringAsFixed(2)}',
             style: const TextStyle(
-                fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.dark),
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: AppColors.dark),
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: _online ? AppColors.green : AppColors.muted,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 5),
+              const Text('Today',
+                  style: TextStyle(fontSize: 12, color: AppColors.muted)),
+            ],
           ),
         ],
       ),

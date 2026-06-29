@@ -1,9 +1,9 @@
 {
-    "name": "sift_app",
-    "short_name": "sift_app",
+    "name": "Sift",
+    "short_name": "Sift",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
+    "background_color": "#FF6B2C",
     "theme_color": "#0175C2",
     "description": "A new Flutter project.",
     "orientation": "portrait-primary",

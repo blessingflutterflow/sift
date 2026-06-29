@@ -64,6 +64,35 @@ async function push(uid, title, body, data = {}) {
   }
 }
 
+/** Data-only high-priority push — wakes the app's background handler so it can
+ *  ring (CallKit) for an offer, even when backgrounded/killed. */
+async function pushData(uid, data) {
+  if (!uid) return;
+  let tokens = [];
+  try {
+    const u = await db().collection("users").doc(uid).get();
+    tokens = (u.data()?.fcmTokens || []).filter(Boolean);
+  } catch (_) {
+    return;
+  }
+  if (!tokens.length) return;
+  try {
+    await admin.messaging().sendEachForMulticast({
+      tokens,
+      data: Object.fromEntries(
+        Object.entries(data).map(([k, v]) => [k, String(v)])
+      ),
+      android: { priority: "high" },
+      apns: {
+        headers: { "apns-priority": "10" },
+        payload: { aps: { contentAvailable: true } },
+      },
+    });
+  } catch (e) {
+    logger.warn("pushData failed", { uid, msg: e?.message });
+  }
+}
+
 const rand = (n) => Math.round(Number(n) || 0);
 
 exports.onRideNotify = onDocumentUpdated(
@@ -73,14 +102,15 @@ exports.onRideNotify = onDocumentUpdated(
     const after = event.data?.after.data() || {};
     const rideId = event.params.rideId;
 
-    // A fresh offer landed on a driver — the most time-critical push.
+    // A fresh offer landed on a driver — ring (data message → CallKit).
     if (after.offeredTo && after.offeredTo !== before.offeredTo) {
-      await push(
-        after.offeredTo,
-        "New ride request 🚗",
-        `R${rand(after.fare)} · ${(after.distanceKm || 0).toFixed(1)} km — 15s to respond`,
-        { type: "offer", rideId }
-      );
+      await pushData(after.offeredTo, {
+        type: "offer",
+        rideId,
+        fare: rand(after.fare),
+        distanceKm: (after.distanceKm || 0).toFixed(1),
+        subtitle: `R${rand(after.fare)} · ${(after.distanceKm || 0).toFixed(1)} km`,
+      });
     }
 
     // Trip status transitions → keep the rider in the loop off-screen.
@@ -163,6 +193,59 @@ exports.onApplicationNotify = onDocumentUpdated(
         after.rejectionReason ||
           "Your application needs attention. Open Sift for details.",
         { type: "application" });
+    }
+  }
+);
+
+exports.onParcelNotify = onDocumentUpdated(
+  { region: REGION, document: "parcels/{parcelId}" },
+  async (event) => {
+    const before = event.data?.before.data() || {};
+    const after = event.data?.after.data() || {};
+    const parcelId = event.params.parcelId;
+
+    // Fresh offer to a driver → ring (data message → CallKit).
+    if (after.offeredTo && after.offeredTo !== before.offeredTo) {
+      const stops = (after.stops || []).length;
+      await pushData(after.offeredTo, {
+        type: "offer",
+        parcelId,
+        subtitle: `${stops} drop-off${stops === 1 ? "" : "s"} · R${rand(after.fare)}`,
+      });
+    }
+
+    // Status changes → the sender (order updates).
+    if (after.status !== before.status) {
+      const sender = after.senderId;
+      const delivered = (after.stops || []).filter(
+        (s) => s && s.status === "delivered"
+      ).length;
+      switch (after.status) {
+        case "accepted":
+          await push(sender, "Driver assigned 📦",
+            `${after.driverName || "A driver"} is on the way to collect your parcel.`,
+            { type: "parcel", parcelId });
+          break;
+        case "delivering":
+          await push(sender, "Parcel collected",
+            "Your parcel is on its way to the drop-offs.",
+            { type: "parcel", parcelId });
+          break;
+        case "completed":
+          await push(sender, "Deliveries complete ✅",
+            `${delivered} of ${(after.stops || []).length} delivered.`,
+            { type: "parcel", parcelId });
+          break;
+        case "cancelled":
+          await push(sender, "Parcel cancelled",
+            "Your parcel delivery was cancelled.", { type: "parcel", parcelId });
+          break;
+        case "expired":
+          await push(sender, "No driver available",
+            "We couldn't find a driver. Please try again shortly.",
+            { type: "parcel", parcelId });
+          break;
+      }
     }
   }
 );

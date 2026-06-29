@@ -4,6 +4,7 @@ import 'package:app_links/app_links.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,7 +12,20 @@ import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
 
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
+import 'data/services/notification_service.dart';
 import 'firebase_options.dart';
+
+/// FCM background isolate: ring (CallKit) when a ride/parcel offer arrives while
+/// the app is backgrounded or killed. Other message types fall through to the
+/// system tray.
+@pragma('vm:entry-point')
+Future<void> fcmBackgroundHandler(RemoteMessage message) async {
+  if (kIsWeb) return;
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  if (message.data['type'] == 'offer') {
+    await showOfferCallkit(Map<String, dynamic>.from(message.data));
+  }
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,6 +41,11 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // Ring on offers that arrive while the app is backgrounded/killed.
+  if (!kIsWeb) {
+    FirebaseMessaging.onBackgroundMessage(fcmBackgroundHandler);
+  }
 
   // Crashlytics + Play-Integrity App Check are Android/iOS only — skip on web
   // (web has no Crashlytics; App Check would need a reCAPTCHA provider).
@@ -57,14 +76,14 @@ Future<void> main() async {
   runApp(const ProviderScope(child: SiftApp()));
 }
 
-class SiftApp extends StatefulWidget {
+class SiftApp extends ConsumerStatefulWidget {
   const SiftApp({super.key});
 
   @override
-  State<SiftApp> createState() => _SiftAppState();
+  ConsumerState<SiftApp> createState() => _SiftAppState();
 }
 
-class _SiftAppState extends State<SiftApp> {
+class _SiftAppState extends ConsumerState<SiftApp> {
   final AppLinks _appLinks = AppLinks();
   StreamSubscription<Uri>? _linkSub;
 
@@ -72,6 +91,10 @@ class _SiftAppState extends State<SiftApp> {
   void initState() {
     super.initState();
     _initDeepLinks();
+    // Foreground notifications, tap-routing + CallKit ring handling.
+    if (!kIsWeb) {
+      unawaited(ref.read(notificationServiceProvider).init());
+    }
   }
 
   /// Route `sift://trip/<rideId>` links to the read-only live trip view, both

@@ -62,6 +62,13 @@ dependencies:
   firebase_messaging: ^16.0.4
   firebase_crashlytics: ^5.0.7
 
+  # Local/heads-up notifications (foreground chat + order updates, tap routing)
+  flutter_local_notifications: ^18.0.1
+
+  # Incoming-call-style ringing for driver ride/parcel offers
+  # (3.0.0 to match the version ZEGOCLOUD already pulls in)
+  flutter_callkit_incoming: ^3.0.0
+
   # Local key-value store (remembers the first-launch onboarding flag)
   shared_preferences: ^2.3.2
 
