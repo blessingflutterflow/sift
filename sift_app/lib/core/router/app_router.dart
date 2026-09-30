@@ -36,6 +36,7 @@ import '../../features/ride_request/matching_screen.dart';
 import '../../features/ride_request/ride_options_screen.dart';
 import '../../features/ride_request/scheduled_rides_screen.dart';
 import '../../features/ride_request/searching_screen.dart';
+import '../../features/support/support_screen.dart';
 
 /// App routes.
 ///
@@ -75,6 +76,9 @@ class AppRouter {
 
   // In-app rider ↔ driver chat
   static const String chat = '/chat';
+
+  // In-app support chat (user ↔ Sift support team)
+  static const String support = '/support';
 
   // Parcel delivery
   static const String sendParcel = '/parcel/send';
@@ -155,6 +159,7 @@ class AppRouter {
           );
         },
       ),
+      _route(support, const SupportScreen()),
       _route(updateRequired, const UpdateRequiredScreen()),
       _route(trips, const TripHistoryScreen()),
       _route(scheduledRides, const ScheduledRidesScreen()),

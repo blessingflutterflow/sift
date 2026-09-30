@@ -8,11 +8,14 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zego_uikit/zego_uikit.dart';
 import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
+import 'package:zego_uikit_signaling_plugin/zego_uikit_signaling_plugin.dart';
 
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'data/services/notification_service.dart';
+import 'features/announcements/announcement_overlay.dart';
 import 'firebase_options.dart';
 
 /// FCM background isolate: ring (CallKit) when a ride/parcel offer arrives while
@@ -71,6 +74,14 @@ Future<void> main() async {
         FirebaseAppCheck.instance.getToken().then((_) {}, onError: (_) {}),
       );
     }
+
+    // ZEGOCLOUD calling — REQUIRED system-calling setup. Must run before
+    // runApp, after setNavigatorKey, and be awaited: this registers the
+    // signaling/offline handler that actually presents the callee's incoming
+    // call screen and lets an accepted call connect. (ZEGO Call Kit quick-start.)
+    await ZegoUIKit().initLog();
+    await ZegoUIKitPrebuiltCallInvitationService()
+        .useSystemCallingUI([ZegoUIKitSignalingPlugin()]);
   }
 
   runApp(const ProviderScope(child: SiftApp()));
@@ -132,6 +143,9 @@ class _SiftAppState extends ConsumerState<SiftApp> {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       routerConfig: AppRouter.router,
+      // Float admin broadcasts full-screen over every route (drivers only).
+      builder: (context, child) =>
+          AnnouncementGate(child: child ?? const SizedBox.shrink()),
     );
   }
 }

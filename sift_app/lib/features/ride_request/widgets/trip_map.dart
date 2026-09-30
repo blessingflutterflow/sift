@@ -24,6 +24,7 @@ class TripMap extends StatefulWidget {
     this.heading,
     this.targetIsDestination = false,
     this.vehicleIsBike = false,
+    this.stops = const [],
   });
 
   /// Live driver position (animated). Null until the driver shares location.
@@ -43,6 +44,9 @@ class TripMap extends StatefulWidget {
 
   /// Render the driver as a bike instead of a car (Sift Bike trips).
   final bool vehicleIsBike;
+
+  /// Intermediate stops on a multi-stop trip, drawn as numbered markers.
+  final List<LatLng> stops;
 
   @override
   State<TripMap> createState() => _TripMapState();
@@ -158,6 +162,14 @@ class _TripMapState extends State<TripMap> with SingleTickerProviderStateMixin {
             ? const Offset(0.5, 0.5)
             : const Offset(0.5, 0.9),
       ),
+      for (int i = 0; i < widget.stops.length; i++)
+        Marker(
+          markerId: MarkerId('stop_$i'),
+          position: widget.stops[i],
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+              BitmapDescriptor.hueOrange),
+          infoWindow: InfoWindow(title: 'Stop ${i + 1}'),
+        ),
       if (_shown != null)
         Marker(
           markerId: const MarkerId('driver'),

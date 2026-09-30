@@ -90,6 +90,9 @@ class _TripFollowScreenState extends ConsumerState<TripFollowScreen> {
                 route: const [],
                 heading: ride.driverHeading,
                 targetIsDestination: ride.status == RideStatus.inProgress,
+                stops: ride.status == RideStatus.inProgress
+                    ? ride.stops.map((s) => s.latLng).toList()
+                    : const [],
               ),
             ),
             SafeArea(

@@ -24,6 +24,7 @@ class DriverNavMap extends StatefulWidget {
     this.targetIsDestination = false,
     this.navigating = true,
     this.bottomPadding = 230,
+    this.stops = const [],
   });
 
   /// Latest raw GPS fix for this device. Null until the first fix lands.
@@ -44,6 +45,9 @@ class DriverNavMap extends StatefulWidget {
 
   /// Keeps the camera target and Google logo clear of the bottom panel.
   final double bottomPadding;
+
+  /// Intermediate stops on a multi-stop trip, drawn as numbered markers.
+  final List<LatLng> stops;
 
   @override
   State<DriverNavMap> createState() => _DriverNavMapState();
@@ -170,6 +174,14 @@ class _DriverNavMapState extends State<DriverNavMap>
             ? const Offset(0.5, 0.5)
             : const Offset(0.5, 0.9),
       ),
+      for (int i = 0; i < widget.stops.length; i++)
+        Marker(
+          markerId: MarkerId('stop_$i'),
+          position: widget.stops[i],
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+              BitmapDescriptor.hueOrange),
+          infoWindow: InfoWindow(title: 'Stop ${i + 1}'),
+        ),
       if (shown != null)
         Marker(
           markerId: const MarkerId('me'),

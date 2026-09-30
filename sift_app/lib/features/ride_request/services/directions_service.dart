@@ -23,7 +23,11 @@ class DirectionsService {
 
   final FirebaseFunctions _functions;
 
-  Future<RouteResult?> route(LatLng origin, LatLng destination) async {
+  Future<RouteResult?> route(
+    LatLng origin,
+    LatLng destination, {
+    List<LatLng> waypoints = const [],
+  }) async {
     try {
       final res = await _functions
           .httpsCallable('getRoute')
@@ -32,6 +36,10 @@ class DirectionsService {
         'oLng': origin.longitude,
         'dLat': destination.latitude,
         'dLng': destination.longitude,
+        if (waypoints.isNotEmpty)
+          'waypoints': waypoints
+              .map((w) => {'lat': w.latitude, 'lng': w.longitude})
+              .toList(),
       });
       final encoded = res.data['points'] as String?;
       if (encoded == null || encoded.isEmpty) return null;

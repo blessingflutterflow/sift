@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:firebase_core/firebase_core.dart' show FirebaseException;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -12,8 +15,10 @@ import '../../data/repositories/ride_repository.dart';
 import '../../data/repositories/surge_repository.dart';
 import '../../data/repositories/wallet_repository.dart';
 import '../auth/session_controller.dart';
+import 'models/pricing_config.dart';
 import 'models/ride_tier.dart';
 import 'ride_request_controller.dart';
+import 'services/places_service.dart';
 import 'widgets/car_image.dart';
 import 'widgets/map_markers.dart';
 
@@ -196,6 +201,119 @@ class _RideOptionsScreenState extends ConsumerState<RideOptionsScreen> {
     return '${t.day} ${months[t.month - 1]}, $h:$m';
   }
 
+  /// Rider-facing price confirmation. Shows the current estimated fare and
+  /// makes the rider tap "Confirm & request" before anything is booked, so the
+  /// price they agree to is always the live, admin-driven one.
+  Future<bool?> _confirmFare({
+    required RideTier tier,
+    required double km,
+    required double fare,
+  }) {
+    final scheduled = _scheduledFor != null;
+    return showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE6E6E8),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(scheduled ? 'Confirm your booking' : 'Confirm your trip',
+                  style: const TextStyle(
+                      fontSize: 20, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 18),
+              _confirmRow('Ride', tier.name),
+              _confirmRow('Distance', '${km.toStringAsFixed(1)} km'),
+              if (ref.read(rideRequestProvider).stops.isNotEmpty)
+                _confirmRow('Stops',
+                    '${ref.read(rideRequestProvider).stops.length}'),
+              if (_surge > 1.0)
+                _confirmRow('Surge',
+                    '${_surge.toStringAsFixed(_surge % 1 == 0 ? 0 : 1)}×'),
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Divider(height: 1, color: Color(0xFFEDEDEF)),
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Estimated fare',
+                      style: TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.w700)),
+                  Text('R${fare.round()}',
+                      style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.green)),
+                ],
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Final fare is confirmed at drop-off from the actual route.',
+                style: TextStyle(fontSize: 12.5, color: AppColors.muted),
+              ),
+              const SizedBox(height: 18),
+              SizedBox(
+                height: 54,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.green,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(27)),
+                  ),
+                  child: Text(scheduled ? 'Confirm booking' : 'Confirm & request',
+                      style: const TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.w700)),
+                ),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel',
+                    style: TextStyle(color: AppColors.muted)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _confirmRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style: const TextStyle(fontSize: 15, color: AppColors.muted)),
+          Text(value,
+              style:
+                  const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
+  }
+
   /// Create the ride request and head to matching — or, for an advance
   /// booking, create a scheduled ride (dispatched later) and return home.
   Future<void> _requestRide() async {
@@ -207,6 +325,17 @@ class _RideOptionsScreenState extends ConsumerState<RideOptionsScreen> {
       context.push(AppRouter.matching, extra: null); // graceful fallback
       return;
     }
+
+    // Fare from the live admin pricing config (same source the server charges
+    // from), scaled by any active surge.
+    final pricing =
+        ref.read(pricingConfigProvider).value ?? PricingConfig.fallback;
+    final fare = tier.fareValue(s.distanceKm, pricing) * _surge;
+
+    // Price confirmation: the rider explicitly agrees to the current fare
+    // before the request goes out.
+    final confirmed = await _confirmFare(tier: tier, km: s.distanceKm, fare: fare);
+    if (confirmed != true) return;
 
     setState(() => _requesting = true);
     final repo = ref.read(rideRepositoryProvider);
@@ -220,8 +349,9 @@ class _RideOptionsScreenState extends ConsumerState<RideOptionsScreen> {
       destinationLabel: s.destinationLabel,
       tierId: tier.id,
       tierName: tier.name,
-      fare: tier.fareValue(s.distanceKm) * _surge,
+      fare: fare,
       distanceKm: s.distanceKm,
+      stops: s.stops,
       paymentMethod: _payMethod,
       scheduledFor: _scheduledFor,
     );
@@ -239,6 +369,18 @@ class _RideOptionsScreenState extends ConsumerState<RideOptionsScreen> {
       final active = await repo.activeRideForRider(session.uid!);
       final rideId = active?.id ?? await repo.createRequest(data);
       if (mounted) context.push(AppRouter.matching, extra: rideId);
+    } on FirebaseException catch (e) {
+      // The rides-create rule refuses a blocked rider → permission-denied. Tell
+      // them plainly instead of the generic "try again".
+      if (mounted) {
+        final blocked = e.code == 'permission-denied';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(blocked
+              ? 'Your account has been blocked. Please contact support.'
+              : 'Could not request ride. Try again.'),
+          backgroundColor: blocked ? const Color(0xFFE0524D) : null,
+        ));
+      }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -252,18 +394,27 @@ class _RideOptionsScreenState extends ConsumerState<RideOptionsScreen> {
 
   void _fitRoute(RideRequestState s) {
     if (_map == null || s.pickup == null || s.destination == null) return;
-    final p = s.pickup!, d = s.destination!;
-    final bounds = LatLngBounds(
-      southwest: LatLng(
-        p.latitude < d.latitude ? p.latitude : d.latitude,
-        p.longitude < d.longitude ? p.longitude : d.longitude,
+    // Fit every point on the trip: pickup, each stop, and the destination.
+    final pts = <LatLng>[
+      s.pickup!,
+      ...s.stops.map((e) => e.latLng),
+      s.destination!,
+    ];
+    var minLat = pts.first.latitude, maxLat = pts.first.latitude;
+    var minLng = pts.first.longitude, maxLng = pts.first.longitude;
+    for (final p in pts) {
+      minLat = p.latitude < minLat ? p.latitude : minLat;
+      maxLat = p.latitude > maxLat ? p.latitude : maxLat;
+      minLng = p.longitude < minLng ? p.longitude : minLng;
+      maxLng = p.longitude > maxLng ? p.longitude : maxLng;
+    }
+    _map!.animateCamera(CameraUpdate.newLatLngBounds(
+      LatLngBounds(
+        southwest: LatLng(minLat, minLng),
+        northeast: LatLng(maxLat, maxLng),
       ),
-      northeast: LatLng(
-        p.latitude > d.latitude ? p.latitude : d.latitude,
-        p.longitude > d.longitude ? p.longitude : d.longitude,
-      ),
-    );
-    _map!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 80));
+      80,
+    ));
   }
 
   @override
@@ -272,6 +423,8 @@ class _RideOptionsScreenState extends ConsumerState<RideOptionsScreen> {
     final size = MediaQuery.sizeOf(context);
     const sheetMin = 0.46;
     final km = s.distanceKm;
+    // Live admin pricing — the tile prices below update when admin changes it.
+    final pricing = ref.watch(pricingConfigProvider).value ?? PricingConfig.fallback;
 
     return Scaffold(
       body: Stack(
@@ -294,6 +447,14 @@ class _RideOptionsScreenState extends ConsumerState<RideOptionsScreen> {
                     position: s.pickup!,
                     icon: MapMarkers.person ?? BitmapDescriptor.defaultMarker,
                     anchor: const Offset(0.5, 0.9),
+                  ),
+                for (int i = 0; i < s.stops.length; i++)
+                  Marker(
+                    markerId: MarkerId('stop_$i'),
+                    position: s.stops[i].latLng,
+                    icon: BitmapDescriptor.defaultMarkerWithHue(
+                        BitmapDescriptor.hueOrange),
+                    infoWindow: InfoWindow(title: 'Stop ${i + 1}'),
                   ),
                 if (s.destination != null)
                   Marker(
@@ -333,7 +494,7 @@ class _RideOptionsScreenState extends ConsumerState<RideOptionsScreen> {
             initialChildSize: sheetMin,
             minChildSize: sheetMin,
             maxChildSize: 0.92,
-            builder: (context, scroll) => _sheet(scroll, km),
+            builder: (context, scroll) => _sheet(scroll, km, pricing),
           ),
         ],
       ),
@@ -369,14 +530,85 @@ class _RideOptionsScreenState extends ConsumerState<RideOptionsScreen> {
                     overflow: TextOverflow.ellipsis),
               ),
             ),
-            IconButton(icon: const Icon(Icons.add, size: 26), onPressed: () {}),
+            IconButton(
+                icon: const Icon(Icons.add, size: 26), onPressed: _addStop),
           ],
         ),
       ),
     );
   }
 
-  Widget _sheet(ScrollController scroll, double km) {
+  /// List of chosen stops (each removable) — shown in the options sheet so the
+  /// rider sees the whole trip and the fare updates as stops change.
+  Widget _stopsSection() {
+    final stops = ref.watch(rideRequestProvider).stops;
+    if (stops.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+      child: Column(
+        children: [
+          for (int i = 0; i < stops.length; i++)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(
+                children: [
+                  Container(
+                    width: 22,
+                    height: 22,
+                    alignment: Alignment.center,
+                    decoration: const BoxDecoration(
+                        color: Color(0xFFFF6B2C), shape: BoxShape.circle),
+                    child: Text('${i + 1}',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700)),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(stops[i].label,
+                        style: const TextStyle(fontSize: 14),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    color: AppColors.muted,
+                    onPressed: () =>
+                        ref.read(rideRequestProvider.notifier).removeStop(i),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Open a place search to add an intermediate stop (pickup → stops → dest).
+  Future<void> _addStop() async {
+    final s = ref.read(rideRequestProvider);
+    if (!s.canAddStop) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('You can add up to $kMaxRideStops stops.')));
+      return;
+    }
+    final picked = await showModalBottomSheet<PlacePrediction>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => const _StopSearchSheet(),
+    );
+    if (picked == null) return;
+    await ref
+        .read(rideRequestProvider.notifier)
+        .addStop(picked.placeId, picked.primary);
+  }
+
+  Widget _sheet(ScrollController scroll, double km, PricingConfig cfg) {
     final tier = kRideTiers[_selected];
     return Container(
       decoration: const BoxDecoration(
@@ -413,13 +645,14 @@ class _RideOptionsScreenState extends ConsumerState<RideOptionsScreen> {
                 ],
               ),
             ),
+          _stopsSection(),
           if (_surge > 1.0) _surgeBadge(),
           Expanded(
             child: ListView.builder(
               controller: scroll,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               itemCount: kRideTiers.length,
-              itemBuilder: (context, i) => _tile(i, km),
+              itemBuilder: (context, i) => _tile(i, km, cfg),
             ),
           ),
           _payRow(),
@@ -456,7 +689,7 @@ class _RideOptionsScreenState extends ConsumerState<RideOptionsScreen> {
     );
   }
 
-  Widget _tile(int i, double km) {
+  Widget _tile(int i, double km, PricingConfig cfg) {
     final t = kRideTiers[i];
     final selected = _selected == i;
     return GestureDetector(
@@ -492,7 +725,7 @@ class _RideOptionsScreenState extends ConsumerState<RideOptionsScreen> {
                 ],
               ),
             ),
-            Text('R${(t.fareValue(km) * _surge).round()}',
+            Text('R${(t.fareValue(km, cfg) * _surge).round()}',
                 style: const TextStyle(
                     fontSize: 18, fontWeight: FontWeight.w800)),
           ],
@@ -646,6 +879,119 @@ class _RideOptionsScreenState extends ConsumerState<RideOptionsScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Bottom-sheet place search for adding a stop. Returns the chosen prediction.
+class _StopSearchSheet extends ConsumerStatefulWidget {
+  const _StopSearchSheet();
+
+  @override
+  ConsumerState<_StopSearchSheet> createState() => _StopSearchSheetState();
+}
+
+class _StopSearchSheetState extends ConsumerState<_StopSearchSheet> {
+  final _controller = TextEditingController();
+  Timer? _debounce;
+  List<PlacePrediction> _predictions = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_onChanged);
+  }
+
+  void _onChanged() {
+    _debounce?.cancel();
+    final q = _controller.text;
+    if (q.trim().length < 2) {
+      setState(() => _predictions = []);
+      return;
+    }
+    _debounce = Timer(const Duration(milliseconds: 300), () async {
+      final preds = await ref.read(placesServiceProvider).autocomplete(q);
+      if (mounted) setState(() => _predictions = preds);
+    });
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 14,
+        bottom: MediaQuery.viewInsetsOf(context).bottom + 16,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Add a stop',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 12),
+          Container(
+            height: 52,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            decoration: BoxDecoration(
+              color: AppColors.field,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.search, size: 22, color: AppColors.muted),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _controller,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      hintText: 'Search stop',
+                      border: InputBorder.none,
+                      isCollapsed: true,
+                    ),
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          ConstrainedBox(
+            constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(context).height * 0.4),
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: _predictions.length,
+              separatorBuilder: (_, _) =>
+                  const Divider(height: 1, color: AppColors.line),
+              itemBuilder: (context, i) {
+                final p = _predictions[i];
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.location_on_outlined,
+                      color: Color(0xFF7A7C86)),
+                  title: Text(p.primary,
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: p.secondary.isEmpty
+                      ? null
+                      : Text(p.secondary,
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                  onTap: () => Navigator.pop(context, p),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

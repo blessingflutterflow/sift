@@ -44,6 +44,9 @@ class SessionController extends Notifier<SessionState> {
   void setDocuments(Map<String, String> documents) =>
       state = state.copyWith(documents: documents);
 
+  void setDocExpiry(Map<String, String> docExpiry) =>
+      state = state.copyWith(docExpiry: docExpiry);
+
   /// Saving the profile finalizes a rider (auto-approved) but leaves a driver
   /// at `none` until they submit documents.
   void saveProfile({required String name, required String email}) {

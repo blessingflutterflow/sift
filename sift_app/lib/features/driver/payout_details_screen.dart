@@ -270,15 +270,16 @@ class _PayoutDetailsScreenState extends ConsumerState<PayoutDetailsScreen> {
                             height: 20,
                             child: CircularProgressIndicator(
                                 strokeWidth: 2, color: Colors.white))
-                        : const Text('Verify & save',
+                        : const Text('Save bank details',
                             style: TextStyle(
                                 fontSize: 16, fontWeight: FontWeight.w700)),
                   ),
                 ),
                 const SizedBox(height: 10),
                 const Text(
-                  'Your account is verified with your bank before saving. '
-                  'Sift never stores your card or online-banking credentials.',
+                  'Double-check your account number — your card-trip earnings '
+                  'are paid here. Sift never stores your card or online-banking '
+                  'credentials.',
                   style: TextStyle(fontSize: 12.5, color: AppColors.muted),
                   textAlign: TextAlign.center,
                 ),

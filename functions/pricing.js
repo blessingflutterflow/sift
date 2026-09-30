@@ -24,6 +24,8 @@ const DEFAULTS = {
   cashDebtCapZar: 300,
   // City-wide surge multiplier applied when no zone covers the pickup.
   surgeMultiplier: 1.0,
+  // How far (km) from the pickup we look for a driver to offer the ride to.
+  dispatchRadiusKm: 20,
   minVersion: "1.0.0",
 };
 

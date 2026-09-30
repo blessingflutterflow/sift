@@ -525,12 +525,18 @@ exports.savePayoutDetails = onCall(
       );
     }
 
-    let accountName;
+    // Paystack account-name resolution only supports NGN/USD/GHS/KES — NOT
+    // South Africa (ZAR). So resolution is best-effort: if it fails (as it
+    // always will for ZA), we still save the details + create the subaccount
+    // from the bank code + account number (which Paystack DOES support for ZA).
+    let accountName = "";
     try {
       const resolved = await paystack.resolveAccount({ accountNumber, bankCode });
-      accountName = resolved.account_name;
+      accountName = resolved.account_name || "";
     } catch (e) {
-      throw new HttpsError("not-found", "Could not verify that account.");
+      logger.info("resolveAccount unavailable (expected for ZA/ZAR)", {
+        msg: e?.message,
+      });
     }
 
     const appRef = db().collection("applications").doc(uid);
@@ -560,7 +566,7 @@ exports.savePayoutDetails = onCall(
         logger.error("subaccount create on save failed", { uid, msg: e?.message });
       }
     }
-    return { accountName, subaccountCode };
+    return { accountName: accountName || null, subaccountCode };
   }
 );
 exports.listBanks = onCall({ region: REGION, secrets: [SECRET] }, async (req) => {

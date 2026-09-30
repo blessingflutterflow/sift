@@ -25,6 +25,7 @@ const REGION = "europe-west1";
 const OFFER_SECONDS = 20;
 const MAX_CANDIDATES = 6;
 const MAX_RADIUS_KM = 20;
+const STALE_MS = 3 * 60 * 1000; // ignore drivers not seen in 3 min (app heartbeats every 40s)
 const ACTIVE_RIDE = ["accepted", "arriving", "arrived", "in_progress"];
 const ACTIVE_PARCEL = ["accepted", "arriving", "picked_up", "delivering"];
 
@@ -58,6 +59,12 @@ async function rankCandidates(pickup) {
     const x = doc.data();
     if (busy.has(doc.id)) return;
     if (typeof x.lat !== "number" || typeof x.lng !== "number") return;
+    // Skip "ghost online" drivers (app died without going offline).
+    const seen = x.updatedAt?.toMillis?.() ?? 0;
+    if (Date.now() - seen > STALE_MS) return;
+    // Parcels go to ANY online driver regardless of category — a Bike, Go, XL
+    // or Max driver can all carry a parcel, so restricting to 'parcel' drivers
+    // only starved the queue.
     const dist = haversineKm(pickup, { lat: x.lat, lng: x.lng });
     if (dist <= MAX_RADIUS_KM) {
       cands.push({ uid: doc.id, dist, lat: x.lat, lng: x.lng });
@@ -314,7 +321,10 @@ async function resolveStop(uid, parcelId, stopIndex, patch) {
     stops[stopIndex] = {
       ...stops[stopIndex],
       ...patch,
-      deliveredAt: admin.firestore.FieldValue.serverTimestamp(),
+      // Concrete timestamp, NOT serverTimestamp(): the FieldValue sentinel is
+      // illegal inside an array element and made the whole completion write
+      // fail ("Could not record this delivery").
+      deliveredAt: admin.firestore.Timestamp.now(),
     };
     const nextPending = stops.findIndex((x) => x.status === "pending");
     const allResolved = nextPending === -1;

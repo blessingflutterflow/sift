@@ -19,6 +19,7 @@ class ApplicationRepository {
     required UserRole role,
     required Map<String, dynamic> vehicle,
     required Map<String, String> documents,
+    Map<String, String> docExpiry = const {},
   }) {
     return _applications.doc(uid).set({
       'uid': uid,
@@ -26,6 +27,7 @@ class ApplicationRepository {
       'status': ApprovalStatus.pending.name,
       'vehicle': vehicle,
       'documents': documents,
+      'docExpiry': docExpiry,
       'submittedAt': FieldValue.serverTimestamp(),
     });
   }

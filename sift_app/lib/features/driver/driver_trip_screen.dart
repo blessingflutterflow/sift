@@ -209,12 +209,29 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
     } catch (_) {}
   }
 
-  /// Hand off to Google Maps turn-by-turn for the current target.
+  /// Hand off to Google Maps turn-by-turn for the current target. On a
+  /// multi-stop trip to the destination, the intermediate stops are passed as
+  /// ordered waypoints so Google Maps routes through them.
   Future<void> _openExternalNav() async {
     final r = _ride;
     if (r == null) return;
     final t = _targetFor(r);
     if (t == null) return;
+    final viaStops = _targetIsDestination && r.stops.isNotEmpty;
+
+    if (viaStops) {
+      // dir URL is the only Google Maps deep link that supports waypoints.
+      final wp = r.stops
+          .map((s) => '${s.latLng.latitude},${s.latLng.longitude}')
+          .join('|');
+      final web = Uri.parse('https://www.google.com/maps/dir/?api=1'
+          '&destination=${t.latitude},${t.longitude}'
+          '&waypoints=${Uri.encodeComponent(wp)}'
+          '&travelmode=driving');
+      await launchUrl(web, mode: LaunchMode.externalApplication);
+      return;
+    }
+
     final native = Uri.parse(
         'google.navigation:q=${t.latitude},${t.longitude}&mode=d');
     if (await launchUrl(native, mode: LaunchMode.externalApplication)) return;
@@ -247,6 +264,10 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
                     target: target,
                     route: _progress?.remainingPath ?? const [],
                     targetIsDestination: _targetIsDestination,
+                    // Show stop markers once the trip to the destination is on.
+                    stops: _targetIsDestination
+                        ? r!.stops.map((s) => s.latLng).toList()
+                        : const [],
                     navigating: r!.status != RideStatus.arrived &&
                         r.status != RideStatus.completed,
                   ),
@@ -317,6 +338,24 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
             style: const TextStyle(color: AppColors.muted),
             maxLines: 2,
             overflow: TextOverflow.ellipsis),
+        if (!goingToPickup && r.stops.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Icon(Icons.alt_route, size: 16, color: Color(0xFFFF6B2C)),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Via ${r.stops.length} stop${r.stops.length == 1 ? '' : 's'}: '
+                  '${r.stops.map((s) => s.label).join(' · ')}',
+                  style: const TextStyle(fontSize: 12.5, color: AppColors.dark),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ],
         const SizedBox(height: 16),
         Row(
           children: [

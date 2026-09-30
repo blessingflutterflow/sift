@@ -83,6 +83,9 @@ class ReceiptScreen extends ConsumerWidget {
             _line('Total', 'R${r.displayFare.toStringAsFixed(2)}', bold: true),
             const SizedBox(height: 6),
             _line('Distance', '${r.distanceKm.toStringAsFixed(1)} km'),
+            if (r.stops.isNotEmpty)
+              _line('Stops',
+                  '${r.stops.length} (${r.stops.map((s) => s.label).join(', ')})'),
             _line('Payment', _paymentLabel(r)),
             if (isDriver) ...[
               const Divider(height: 22, color: AppColors.line),

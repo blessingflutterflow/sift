@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Location: Home screen centers the map on the user's current position -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
@@ -24,6 +25,17 @@
     <!-- Incoming-call-style ringing for ride/parcel offers (CallKit) -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
     <uses-permission android:name="android.permission.MANAGE_OWN_CALLS"/>
+
+    <!-- ZEGOCLOUD voice call: draw the incoming-call screen over other apps /
+         the lock screen so the callee can actually answer the ring. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
+
+    <!-- Floating "you're online" bubble (flutter_overlay_window). Android 14+
+         requires a foreground service to declare its type explicitly — without
+         this the overlay service silently refuses to start. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
 
     <application
         android:label="Sift"
@@ -72,6 +84,19 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- dash_bubble's BubbleService is declared by the plugin WITHOUT a
+             foregroundServiceType, which crashes on Android 14+ (targetSdk 34+).
+             Merge the required type onto it here so the bubble can start. -->
+        <service
+            android:name="dev.moaz.dash_bubble.src.BubbleService"
+            android:foregroundServiceType="specialUse"
+            android:exported="false"
+            tools:node="merge">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Floating driver-status indicator while online"/>
+        </service>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

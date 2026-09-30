@@ -66,7 +66,14 @@ async function push(uid, title, body, data = {}) {
 
 /** Data-only high-priority push — wakes the app's background handler so it can
  *  ring (CallKit) for an offer, even when backgrounded/killed. */
-async function pushData(uid, data) {
+/**
+ * Data push. When [notification] is supplied the message ALSO carries a
+ * visible notification — a deliberate safety net for ride/parcel offers: if the
+ * CallKit ring can't start on a given phone (notification permission off,
+ * Android 14 full-screen-intent not granted, OEM background limits), the driver
+ * still gets a loud heads-up instead of silently missing the job.
+ */
+async function pushData(uid, data, notification) {
   if (!uid) return;
   let tokens = [];
   try {
@@ -82,7 +89,21 @@ async function pushData(uid, data) {
       data: Object.fromEntries(
         Object.entries(data).map(([k, v]) => [k, String(v)])
       ),
-      android: { priority: "high" },
+      ...(notification ? { notification } : {}),
+      android: {
+        priority: "high",
+        ...(notification
+          ? {
+              notification: {
+                channelId: "sift_messages",
+                priority: "max",
+                visibility: "public",
+                defaultSound: true,
+                defaultVibrateTimings: true,
+              },
+            }
+          : {}),
+      },
       apns: {
         headers: { "apns-priority": "10" },
         payload: { aps: { contentAvailable: true } },
@@ -104,13 +125,20 @@ exports.onRideNotify = onDocumentUpdated(
 
     // A fresh offer landed on a driver — ring (data message → CallKit).
     if (after.offeredTo && after.offeredTo !== before.offeredTo) {
-      await pushData(after.offeredTo, {
-        type: "offer",
-        rideId,
-        fare: rand(after.fare),
-        distanceKm: (after.distanceKm || 0).toFixed(1),
-        subtitle: `R${rand(after.fare)} · ${(after.distanceKm || 0).toFixed(1)} km`,
-      });
+      await pushData(
+        after.offeredTo,
+        {
+          type: "offer",
+          rideId,
+          fare: rand(after.fare),
+          distanceKm: (after.distanceKm || 0).toFixed(1),
+          subtitle: `R${rand(after.fare)} · ${(after.distanceKm || 0).toFixed(1)} km`,
+        },
+        {
+          title: "New ride request",
+          body: `R${rand(after.fare)} · ${(after.distanceKm || 0).toFixed(1)} km — tap to view`,
+        }
+      );
     }
 
     // Trip status transitions → keep the rider in the loop off-screen.
@@ -207,11 +235,18 @@ exports.onParcelNotify = onDocumentUpdated(
     // Fresh offer to a driver → ring (data message → CallKit).
     if (after.offeredTo && after.offeredTo !== before.offeredTo) {
       const stops = (after.stops || []).length;
-      await pushData(after.offeredTo, {
-        type: "offer",
-        parcelId,
-        subtitle: `${stops} drop-off${stops === 1 ? "" : "s"} · R${rand(after.fare)}`,
-      });
+      await pushData(
+        after.offeredTo,
+        {
+          type: "offer",
+          parcelId,
+          subtitle: `${stops} drop-off${stops === 1 ? "" : "s"} · R${rand(after.fare)}`,
+        },
+        {
+          title: "New parcel delivery",
+          body: `${stops} drop-off${stops === 1 ? "" : "s"} · R${rand(after.fare)} — tap to view`,
+        }
+      );
     }
 
     // Status changes → the sender (order updates).

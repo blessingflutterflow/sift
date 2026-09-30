@@ -47,6 +47,14 @@ function normalizePhone(raw) {
 // internal testing track and Play Integrity attests automatically.
 const OTP_THROTTLE = { minIntervalMs: 45 * 1000, maxPerHour: 6 };
 
+// DEV/TEST: fixed-code logins that skip Twilio entirely (e.g. when SMS credit
+// is exhausted). Phone number → the code that "works" for it. These map to
+// pre-seeded driver/rider accounts. ⚠️ Empty this object before launch.
+const TEST_NUMBERS = {
+  "+27600000001": "123456", // seeded Test Driver (approved)
+  "+27600000002": "123456", // seeded Test Rider (verified)
+};
+
 /** Allow at most one send per 45s and 6 per hour per phone number. */
 async function allowOtpSend(phone) {
   const ref = db().collection("otp_throttle").doc(phone);
@@ -82,6 +90,11 @@ exports.sendOtp = onCall(
   if (!phone) {
     throw new HttpsError("invalid-argument", "A valid phone number is required.");
   }
+  // Test numbers don't send a real SMS — the fixed code is accepted on verify.
+  if (TEST_NUMBERS[phone]) {
+    logger.info("sendOtp test bypass", { phone });
+    return { sent: true };
+  }
   if (!(await allowOtpSend(phone))) {
     throw new HttpsError(
       "resource-exhausted",
@@ -115,30 +128,38 @@ exports.verifyOtp = onCall(
     throw new HttpsError("invalid-argument", "Phone and code are required.");
   }
 
-  let check;
-  try {
-    check = await twilioClient()
-      .verify.v2.services(TWILIO_VERIFY_SERVICE_SID.value())
-      .verificationChecks.create({ to: phone, code: String(code) });
-    logger.info("verifyOtp check status", { status: check.status });
-  } catch (err) {
-    logger.error("verifyOtp check failed", {
-      twilioCode: err && err.code,
-      message: err && err.message,
-      phone,
-    });
-    // 20404 = no pending verification (expired or already used).
-    if (err && err.code === 20404) {
-      throw new HttpsError(
-        "deadline-exceeded",
-        "Your code expired. Request a new one.",
-      );
+  // Test-number bypass: accept the fixed code, skip Twilio entirely.
+  if (TEST_NUMBERS[phone]) {
+    if (String(code) !== TEST_NUMBERS[phone]) {
+      throw new HttpsError("unauthenticated", "The code is incorrect or expired.");
     }
-    throw new HttpsError("internal", "Could not verify the code.");
-  }
+    logger.info("verifyOtp test bypass", { phone });
+  } else {
+    let check;
+    try {
+      check = await twilioClient()
+        .verify.v2.services(TWILIO_VERIFY_SERVICE_SID.value())
+        .verificationChecks.create({ to: phone, code: String(code) });
+      logger.info("verifyOtp check status", { status: check.status });
+    } catch (err) {
+      logger.error("verifyOtp check failed", {
+        twilioCode: err && err.code,
+        message: err && err.message,
+        phone,
+      });
+      // 20404 = no pending verification (expired or already used).
+      if (err && err.code === 20404) {
+        throw new HttpsError(
+          "deadline-exceeded",
+          "Your code expired. Request a new one.",
+        );
+      }
+      throw new HttpsError("internal", "Could not verify the code.");
+    }
 
-  if (check.status !== "approved") {
-    throw new HttpsError("unauthenticated", "The code is incorrect or expired.");
+    if (check.status !== "approved") {
+      throw new HttpsError("unauthenticated", "The code is incorrect or expired.");
+    }
   }
 
   // Get-or-create the Firebase user keyed by phone number.
@@ -184,3 +205,6 @@ Object.assign(exports, require("./parcels"));
 
 // Rider identity verification (AWS Rekognition face match).
 Object.assign(exports, require("./faceVerify"));
+
+// Admin broadcasts → drivers (full-screen in-app + FCM topic push).
+Object.assign(exports, require("./announcements"));

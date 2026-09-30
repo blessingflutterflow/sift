@@ -24,26 +24,56 @@ class DriverDocumentsScreen extends ConsumerStatefulWidget {
 }
 
 class _Doc {
-  const _Doc(this.key, this.label, this.icon);
+  const _Doc(this.key, this.label, this.icon, {this.expiryKey});
   final String key;
   final String label;
   final IconData icon;
+
+  /// Docs that expire also capture an expiry date, stored under this key to
+  /// match the admin's `docExpiry` (license / insurance).
+  final String? expiryKey;
 }
 
 class _DriverDocumentsScreenState
     extends ConsumerState<DriverDocumentsScreen> {
   static const _docs = [
-    _Doc('licence', "Driver's licence", Icons.badge_outlined),
+    _Doc('licence', "Driver's licence", Icons.badge_outlined,
+        expiryKey: 'license'),
     _Doc('id', 'National ID or passport', Icons.contact_page_outlined),
     _Doc('vehicle_reg', 'Vehicle registration', Icons.description_outlined),
+    _Doc('insurance', 'Insurance certificate', Icons.verified_user_outlined,
+        expiryKey: 'insurance'),
     _Doc('photo', 'Profile photo', Icons.account_circle_outlined),
   ];
 
   final Map<String, String> _uploaded = {}; // key -> download URL
+  final Map<String, String> _expiry = {}; // expiryKey -> yyyy-MM-dd
   final Set<String> _uploading = {};
   final _picker = ImagePicker();
 
-  bool get _allUploaded => _uploaded.length == _docs.length;
+  bool get _allUploaded =>
+      _uploaded.length == _docs.length &&
+      _docs
+          .where((d) => d.expiryKey != null)
+          .every((d) => _expiry.containsKey(d.expiryKey));
+
+  Future<void> _pickExpiry(_Doc doc) async {
+    final key = doc.expiryKey;
+    if (key == null) return;
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: now.add(const Duration(days: 365)),
+      firstDate: now,
+      lastDate: DateTime(now.year + 20),
+      helpText: 'Select ${doc.label} expiry',
+    );
+    if (picked != null) {
+      final iso =
+          '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+      setState(() => _expiry[key] = iso);
+    }
+  }
 
   Future<void> _pick(_Doc doc) async {
     final source = await showModalBottomSheet<ImageSource>(
@@ -104,11 +134,15 @@ class _DriverDocumentsScreenState
             file: File(picked.path),
           );
       if (mounted) setState(() => _uploaded[doc.key] = url);
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Upload failed. Try again.')),
-        );
+        // Surface the real reason (e.g. a Storage 'unauthorized' = App Check
+        // enforcement) so a failed upload is diagnosable, not a dead end.
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Upload failed: $e'),
+          backgroundColor: const Color(0xFFE0524D),
+          duration: const Duration(seconds: 6),
+        ));
       }
     } finally {
       if (mounted) setState(() => _uploading.remove(doc.key));
@@ -116,7 +150,9 @@ class _DriverDocumentsScreenState
   }
 
   void _continue() {
-    ref.read(sessionProvider.notifier).setDocuments(Map.of(_uploaded));
+    ref.read(sessionProvider.notifier)
+      ..setDocuments(Map.of(_uploaded))
+      ..setDocExpiry(Map.of(_expiry));
     context.go(AppRouter.vehicleDetails);
   }
 
@@ -177,10 +213,55 @@ class _DriverDocumentsScreenState
   Widget _docRow(_Doc doc) {
     final done = _uploaded.containsKey(doc.key);
     final busy = _uploading.contains(doc.key);
+    return Column(
+      children: [
+        _docTile(doc, done, busy),
+        if (doc.expiryKey != null) _expiryRow(doc),
+        const SizedBox(height: 12),
+      ],
+    );
+  }
+
+  Widget _expiryRow(_Doc doc) {
+    final date = _expiry[doc.expiryKey];
+    final set = date != null;
+    return GestureDetector(
+      onTap: () => _pickExpiry(doc),
+      child: Container(
+        margin: const EdgeInsets.only(top: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: set ? AppColors.selectedBorder : AppColors.line,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.event_outlined,
+                size: 22, color: set ? AppColors.green : AppColors.muted),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                set ? 'Expires $date' : 'Set expiry date',
+                style: TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w500,
+                    color: set ? AppColors.dark : AppColors.muted),
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: AppColors.muted),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _docTile(_Doc doc, bool done, bool busy) {
     return GestureDetector(
       onTap: busy ? null : () => _pick(doc),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: done ? AppColors.selectedFill : Colors.white,

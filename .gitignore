@@ -45,3 +45,7 @@ _flutter_run.log
 
 # sift_admin is its own repo (github.com/blessingflutterflow/sift-admin)
 sift_admin/
+
+# Local tooling config / personal documents — not app source
+.claude/
+*signed*.pdf

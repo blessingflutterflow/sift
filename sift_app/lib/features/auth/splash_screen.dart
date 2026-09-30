@@ -41,9 +41,10 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
       destination = AppRouter.verification;
     }
 
-    // Keep the splash visible long enough for the logo animation to read.
+    // Keep the splash up just long enough for the logo to register, not a beat
+    // longer — trimmed from 900ms so the app doesn't linger on the orange.
     final elapsed = DateTime.now().difference(start);
-    final remaining = const Duration(milliseconds: 900) - elapsed;
+    final remaining = const Duration(milliseconds: 450) - elapsed;
     if (remaining > Duration.zero) await Future.delayed(remaining);
 
     if (!mounted) return;
@@ -60,27 +61,36 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return _entryDestination();
 
-    // Force-update gate: builds older than minVersion predate money-critical
-    // contracts and must not run. Best effort — read failures skip the gate.
-    try {
-      final cfg = await FirebaseFirestore.instance
-          .collection('config')
-          .doc('pricing')
-          .get();
-      final min = cfg.data()?['minVersion'] as String?;
-      if (min != null && _versionBelow(AppConfig.appVersion, min)) {
-        return AppRouter.updateRequired;
-      }
-    } catch (_) {}
+    // Kick off the (independent) force-update check and the profile load
+    // together so we don't pay two round-trips back-to-back. The version gate
+    // is capped at 2s and skipped on slow/failed reads — it must never hold the
+    // splash hostage on a bad connection.
+    final blockedFuture = _minVersionBlocks()
+        .timeout(const Duration(seconds: 2), onTimeout: () => false)
+        .catchError((_) => false);
+    final destFuture = resolvePostAuthDestination(ref, user.uid);
 
-    // Signed in — load profile and route to the right place, gated behind a
-    // biometric unlock if the user has enabled app lock.
-    final dest = await resolvePostAuthDestination(ref, user.uid);
+    if (await blockedFuture) return AppRouter.updateRequired;
+
+    // Signed in — route to the right place, gated behind a biometric unlock if
+    // the user has enabled app lock.
+    final dest = await destFuture;
     if (await ref.read(biometricServiceProvider).shouldLock()) {
       _postUnlockDestination = dest;
       return AppRouter.biometricLock;
     }
     return dest;
+  }
+
+  /// True when this build predates the admin-configured minimum version and
+  /// must show the force-update screen.
+  Future<bool> _minVersionBlocks() async {
+    final cfg = await FirebaseFirestore.instance
+        .collection('config')
+        .doc('pricing')
+        .get();
+    final min = cfg.data()?['minVersion'] as String?;
+    return min != null && _versionBelow(AppConfig.appVersion, min);
   }
 
   /// First-launch users see the onboarding carousel; afterwards they go
@@ -122,13 +132,15 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 84,
-                height: 84,
+                width: 96,
+                height: 96,
+                padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(24),
                 ),
-                child: const Icon(Icons.bolt, color: AppColors.green, size: 52),
+                child: Image.asset('assets/brand/logo.png',
+                    fit: BoxFit.contain),
               ),
               const SizedBox(height: 20),
               const Text(

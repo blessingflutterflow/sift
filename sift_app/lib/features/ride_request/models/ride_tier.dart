@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/config.dart';
+import 'pricing_config.dart';
 
 /// A selectable ride tier. [multiplier] scales the base fare; [badge] is an
 /// optional small green accent (electric ⚡, pet 🐾).
@@ -33,21 +33,11 @@ class RideTier {
   String get seatsLabel =>
       seatsText ?? '$seats seat${seats == 1 ? '' : 's'}';
 
-  /// Numeric fare for a trip distance (ZAR).
-  double fareValue(double distanceKm) =>
-      (AppConfig.fareBase + AppConfig.farePerKm * distanceKm) * multiplier;
-
-  /// Fare for a given trip distance, e.g. "R76" or "R185–278".
-  String price(double distanceKm) {
-    final fare = (AppConfig.fareBase + AppConfig.farePerKm * distanceKm) *
-        multiplier;
-    if (range) {
-      final low = fare * 0.85;
-      final high = fare * 1.15;
-      return 'R${low.round()}–${high.round()}';
-    }
-    return 'R${fare.toStringAsFixed(0)}';
-  }
+  /// Numeric fare for a trip distance (ZAR), computed from the live admin
+  /// pricing config so it reflects any base/per-km/multiplier changes.
+  double fareValue(double distanceKm, PricingConfig cfg) =>
+      (cfg.fareBase + cfg.farePerKm * distanceKm) *
+      cfg.multiplierFor(id, multiplier);
 }
 
 /// Tiers, scaling up by passenger capacity. (These will become

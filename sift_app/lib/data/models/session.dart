@@ -30,6 +30,7 @@ class SessionState {
     this.status = ApprovalStatus.none,
     this.documentsSubmitted = false,
     this.documents = const {},
+    this.docExpiry = const {},
     this.rejectionReason,
   });
 
@@ -43,6 +44,10 @@ class SessionState {
 
   /// Uploaded driver document download URLs, keyed by document type.
   final Map<String, String> documents;
+
+  /// Document expiry dates (ISO yyyy-MM-dd) keyed to match the admin's
+  /// `docExpiry` (license / insurance / prdp).
+  final Map<String, String> docExpiry;
   final String? rejectionReason;
 
   /// A rider is usable once they have a profile; a driver only once approved.
@@ -63,6 +68,7 @@ class SessionState {
     ApprovalStatus? status,
     bool? documentsSubmitted,
     Map<String, String>? documents,
+    Map<String, String>? docExpiry,
     String? rejectionReason,
     bool clearRejection = false,
   }) {
@@ -75,6 +81,7 @@ class SessionState {
       status: status ?? this.status,
       documentsSubmitted: documentsSubmitted ?? this.documentsSubmitted,
       documents: documents ?? this.documents,
+      docExpiry: docExpiry ?? this.docExpiry,
       rejectionReason:
           clearRejection ? null : (rejectionReason ?? this.rejectionReason),
     );

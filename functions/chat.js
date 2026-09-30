@@ -63,3 +63,18 @@ exports.onMessageCreated = onDocumentCreated(
     await push(recipient, senderName, preview, { type: "chat", rideId });
   }
 );
+
+/** Support reply (admin → user): wake the user's phone. Thread id == user uid. */
+exports.onSupportMessage = onDocumentCreated(
+  { region: REGION, document: "support_threads/{uid}/messages/{messageId}" },
+  async (event) => {
+    const msg = event.data?.data();
+    if (!msg || msg.senderRole !== "admin") return; // only notify on admin replies
+    const uid = event.params.uid;
+    const preview =
+      (msg.text || "").length > 80
+        ? `${msg.text.slice(0, 80)}…`
+        : msg.text || "New message";
+    await push(uid, "Sift Support", preview, { type: "support" });
+  }
+);

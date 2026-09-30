@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The floating-bubble icon is loaded at runtime by name via
+  Resources.getIdentifier("sift_bubble", ...) inside dash_bubble. The release
+  build's resource optimizer can't see that string reference, so it collapses
+  the drawable's name (and may strip it) — which makes the lookup return 0 and
+  dash_bubble falls back to its default blue-bird icon. Allowlisting it here
+  keeps the name intact so our Sift logo shows in release builds.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/sift_bubble"
+    tools:shrinkMode="safe" />

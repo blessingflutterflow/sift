@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
@@ -9,6 +10,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/router/app_router.dart';
 import '../../features/auth/session_controller.dart';
+import '../../features/chat/chat_screen.dart';
+import '../repositories/parcel_repository.dart';
 import '../repositories/ride_repository.dart';
 
 /// FCM token lifecycle + notification UX:
@@ -50,10 +53,19 @@ class NotificationService {
         iOS: DarwinInitializationSettings(),
       ),
       onDidReceiveNotificationResponse: (resp) {
-        final rideId = resp.payload;
-        if (rideId != null && rideId.isNotEmpty) {
-          _routeTo({'type': 'ride', 'rideId': rideId});
-        }
+        // Payload is "type:id" so a tapped chat banner opens the chat, not the
+        // trip screen. Older/simple payloads (just an id) fall back to 'ride'.
+        final payload = resp.payload ?? '';
+        if (payload.isEmpty) return;
+        final i = payload.indexOf(':');
+        final type = i > 0 ? payload.substring(0, i) : 'ride';
+        final id = i > 0 ? payload.substring(i + 1) : payload;
+        if (id.isEmpty && type != 'support') return;
+        _routeTo({
+          'type': type,
+          'rideId': id,
+          'parcelId': type == 'parcel' ? id : '',
+        });
       },
     );
     await _local
@@ -81,6 +93,9 @@ class NotificationService {
       await showOfferRing(data);
       return;
     }
+    // Admin broadcast: the full-screen takeover (AnnouncementGate) already shows
+    // it live while the app is open, so don't also draw a tray banner.
+    if (data['type'] == 'announcement') return;
     final n = m.notification;
     final title = n?.title ?? _titleFor(data);
     final body = n?.body ?? '';
@@ -98,7 +113,10 @@ class NotificationService {
         ),
         iOS: const DarwinNotificationDetails(),
       ),
-      payload: (data['rideId'] ?? data['parcelId'] ?? '').toString(),
+      // Encode the type so the tap handler can open the right screen (chat vs
+      // trip vs parcel).
+      payload: '${data['type'] ?? 'ride'}:'
+          '${(data['rideId'] ?? data['parcelId'] ?? '').toString()}',
     );
   }
 
@@ -108,6 +126,8 @@ class NotificationService {
         return 'New message';
       case 'parcel':
         return 'Parcel update';
+      case 'support':
+        return 'Sift Support';
       default:
         return 'Sift';
     }
@@ -117,24 +137,58 @@ class NotificationService {
   Future<void> showOfferRing(Map<String, dynamic> data) =>
       showOfferCallkit(data);
 
+  /// Stop the ringing offer UI (called when the offer is accepted/declined
+  /// from inside the app, so the CallKit ring doesn't keep going).
+  Future<void> endOfferRing() async {
+    try {
+      await FlutterCallkitIncoming.endAllCalls();
+    } catch (_) {}
+  }
+
   Future<void> _onCallEvent(CallEvent? event) async {
     if (event == null) return;
     final extra = Map<String, dynamic>.from(event.body['extra'] ?? {});
+    // CRITICAL: zego_uikit_prebuilt_call uses flutter_callkit_incoming under the
+    // hood, so ZEGO voice-call events arrive on this SAME stream. Only handle
+    // our own ride/parcel offer rings (tagged 'siftOffer') and let ZEGO's call
+    // events pass through untouched — otherwise we'd endAllCalls()/navigate and
+    // kill an in-progress voice call.
+    if (extra['siftOffer']?.toString() != '1') return;
     final rideId = (extra['rideId'] ?? '').toString();
+    final parcelId = (extra['parcelId'] ?? '').toString();
 
     switch (event.event) {
       case Event.actionCallAccept:
+        // Accepting the ring must actually accept the job, then open it. The
+        // driver-home active-trip stream also resumes it, but we accept here so
+        // it works even from a cold start / before the offer card mounts.
         await FlutterCallkitIncoming.endAllCalls();
-        // Open the driver to the offer; the live offer card handles acceptance.
-        AppRouter.router.go(AppRouter.driverHome);
+        try {
+          if (parcelId.isNotEmpty) {
+            await _ref.read(parcelRepositoryProvider).accept(parcelId);
+            AppRouter.router.go(AppRouter.driverHome);
+            AppRouter.router.push(AppRouter.parcelDelivery, extra: parcelId);
+          } else if (rideId.isNotEmpty) {
+            await _ref.read(rideRepositoryProvider).accept(rideId);
+            AppRouter.router.go(AppRouter.driverHome);
+            AppRouter.router.push(AppRouter.driverTrip, extra: rideId);
+          } else {
+            AppRouter.router.go(AppRouter.driverHome);
+          }
+        } catch (_) {
+          // Already taken / expired — just land on home, no dead-end.
+          AppRouter.router.go(AppRouter.driverHome);
+        }
         break;
       case Event.actionCallDecline:
       case Event.actionCallTimeout:
-        if (rideId.isNotEmpty) {
-          try {
+        try {
+          if (parcelId.isNotEmpty) {
+            await _ref.read(parcelRepositoryProvider).decline(parcelId);
+          } else if (rideId.isNotEmpty) {
             await _ref.read(rideRepositoryProvider).decline(rideId);
-          } catch (_) {}
-        }
+          }
+        } catch (_) {}
         await FlutterCallkitIncoming.endAllCalls();
         break;
       default:
@@ -152,6 +206,8 @@ class NotificationService {
         AppRouter.router.go(AppRouter.driverHome);
         break;
       case 'chat':
+        if (rideId.isNotEmpty) unawaited(_openChat(rideId, isDriver));
+        break;
       case 'ride':
         if (rideId.isEmpty) break;
         if (isDriver) {
@@ -167,7 +223,36 @@ class NotificationService {
           extra: parcelId,
         );
         break;
+      case 'support':
+        AppRouter.router.push(AppRouter.support);
+        break;
     }
+  }
+
+  /// Open the in-app chat for a ride straight from a message notification.
+  /// Looks up the other party's name from the ride doc so the chat header is
+  /// right; falls back to a generic label if the read fails.
+  Future<void> _openChat(String rideId, bool isDriver) async {
+    final session = _ref.read(sessionProvider);
+    var otherName = isDriver ? 'Rider' : 'Driver';
+    try {
+      final r = (await _db.collection('rides').doc(rideId).get()).data();
+      if (r != null) {
+        otherName =
+            (isDriver ? r['riderName'] : r['driverName'])?.toString() ??
+                otherName;
+      }
+    } catch (_) {/* keep the fallback label */}
+    AppRouter.router.push(
+      AppRouter.chat,
+      extra: ChatArgs(
+        rideId: rideId,
+        currentUserId: session.uid ?? '',
+        currentUserRole: isDriver ? 'driver' : 'rider',
+        currentUserName: session.name,
+        otherUserName: otherName,
+      ),
+    );
   }
 
   // --- token lifecycle ---
@@ -181,6 +266,14 @@ class NotificationService {
         _token = token;
         await _save(uid, token);
       }
+      // Subscribe to the role broadcast topic so admin announcements reach the
+      // user even when the app is closed (drivers → 'drivers', riders →
+      // 'riders'). Individually-targeted announcements are pushed per-uid.
+      try {
+        final isDriver = _ref.read(sessionProvider).isDriver;
+        await _messaging.subscribeToTopic(isDriver ? 'drivers' : 'riders');
+        await _messaging.unsubscribeFromTopic(isDriver ? 'riders' : 'drivers');
+      } catch (_) {}
       _refreshSub ??= _messaging.onTokenRefresh.listen((t) {
         _token = t;
         final u = _uid;
@@ -201,6 +294,10 @@ class NotificationService {
     final uid = _uid;
     final token = _token;
     _uid = null;
+    try {
+      await _messaging.unsubscribeFromTopic('drivers');
+      await _messaging.unsubscribeFromTopic('riders');
+    } catch (_) {}
     if (uid == null || token == null) return;
     await _db.collection('users').doc(uid).update({
       'fcmTokens': FieldValue.arrayRemove([token]),
@@ -225,7 +322,9 @@ Future<void> showOfferCallkit(Map<String, dynamic> data) async {
     duration: 20000,
     textAccept: 'Accept',
     textDecline: 'Decline',
-    extra: <String, dynamic>{...data},
+    // 'siftOffer' marks this as OUR ride/parcel offer ring so _onCallEvent can
+    // distinguish it from ZEGO voice-call events on the shared CallKit stream.
+    extra: <String, dynamic>{'siftOffer': '1', ...data},
     android: const AndroidParams(
       isCustomNotification: true,
       isShowLogo: false,
@@ -236,5 +335,13 @@ Future<void> showOfferCallkit(Map<String, dynamic> data) async {
     ),
     ios: const IOSParams(handleType: 'generic'),
   );
-  await FlutterCallkitIncoming.showCallkitIncoming(params);
+  // Best-effort: on some OEM/Android builds starting the CallKit ring (a
+  // phone-call foreground service) can throw — never let that take the app
+  // down. If the ring fails, the in-app offer card + FCM still surface the job.
+  try {
+    await FlutterCallkitIncoming.showCallkitIncoming(params);
+  } catch (e, s) {
+    FirebaseCrashlytics.instance
+        .recordError(e, s, reason: 'showCallkitIncoming failed', fatal: false);
+  }
 }

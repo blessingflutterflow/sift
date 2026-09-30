@@ -19,7 +19,8 @@ class AppConfig {
 
   // ZEGOCLOUD in-app voice calling (rider ↔ driver). No phone number / no
   // telephony paperwork — calls run over data via the ZEGOCLOUD SDK.
-  static const int zegoAppID = 935284315;
+  // Client's own ZEGO project (App Sign auth).
+  static const int zegoAppID = 469062561;
   static const String zegoAppSign =
-      '65389ca237b8f8fd491854fd2e6d95a6b657fbab2af43630c67b505388837687';
+      '3b790fec634272708d9ba6851896ec78dfe4add773b52fa20f078e113f31955a';
 }

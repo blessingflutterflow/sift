@@ -28,6 +28,8 @@ class _DestinationScreenState extends ConsumerState<DestinationScreen> {
   final _controller = TextEditingController();
   Timer? _debounce;
   List<PlacePrediction> _predictions = [];
+  // When true the search box is editing the PICKUP; otherwise the destination.
+  bool _pickupMode = false;
 
   @override
   void initState() {
@@ -65,6 +67,30 @@ class _DestinationScreenState extends ConsumerState<DestinationScreen> {
     });
   }
 
+  void _enterPickupMode() {
+    setState(() {
+      _pickupMode = true;
+      _controller.clear();
+      _predictions = [];
+    });
+  }
+
+  Future<void> _selectPickup({String? placeId, LatLng? coords, required String label}) async {
+    final notifier = ref.read(rideRequestProvider.notifier);
+    if (placeId != null) {
+      await notifier.choosePickup(placeId, label);
+    } else if (coords != null) {
+      await notifier.choosePickupCoords(coords, label);
+    }
+    if (mounted) {
+      setState(() {
+        _pickupMode = false;
+        _controller.clear();
+        _predictions = [];
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final pickup = ref.watch(rideRequestProvider).pickupAddress;
@@ -93,9 +119,9 @@ class _DestinationScreenState extends ConsumerState<DestinationScreen> {
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
             child: Column(
               children: [
-                _pickupRow(pickup),
+                _pickupMode ? _pickupField() : _pickupRow(pickup),
                 const SizedBox(height: 12),
-                _destinationField(),
+                _pickupMode ? _destinationStaticRow() : _destinationField(),
               ],
             ),
           ),
@@ -109,12 +135,51 @@ class _DestinationScreenState extends ConsumerState<DestinationScreen> {
   }
 
   Widget _pickupRow(String address) {
+    return GestureDetector(
+      onTap: _enterPickupMode,
+      child: Container(
+        height: 56,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: BoxDecoration(
+          color: AppColors.field,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                color: const Color(0xFF4C56F4),
+                shape: BoxShape.circle,
+                border: Border.all(color: const Color(0xFFC9CCFF), width: 4),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(address,
+                  style: const TextStyle(fontSize: 17, color: AppColors.dark),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+            ),
+            const SizedBox(width: 8),
+            const Icon(Icons.edit_outlined, size: 18, color: AppColors.muted),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Editable pickup search (mirrors the destination field) — lets the rider
+  /// type a pickup instead of relying on GPS.
+  Widget _pickupField() {
     return Container(
       height: 56,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.only(left: 16, right: 6),
       decoration: BoxDecoration(
-        color: AppColors.field,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF4C56F4), width: 2),
       ),
       child: Row(
         children: [
@@ -129,12 +194,65 @@ class _DestinationScreenState extends ConsumerState<DestinationScreen> {
           ),
           const SizedBox(width: 14),
           Expanded(
-            child: Text(address,
-                style: const TextStyle(fontSize: 17, color: AppColors.dark),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis),
+            child: TextField(
+              controller: _controller,
+              autofocus: true,
+              decoration: const InputDecoration(
+                hintText: 'Search pickup',
+                hintStyle: TextStyle(color: AppColors.muted),
+                border: InputBorder.none,
+                isCollapsed: true,
+              ),
+              style: const TextStyle(fontSize: 17, color: AppColors.dark),
+            ),
+          ),
+          TextButton(
+            onPressed: () => setState(() {
+              _pickupMode = false;
+              _controller.clear();
+              _predictions = [];
+            }),
+            child: const Text('Cancel',
+                style: TextStyle(color: AppColors.muted)),
           ),
         ],
+      ),
+    );
+  }
+
+  /// While editing the pickup, the destination collapses to a static row the
+  /// rider can tap to switch back to destination search.
+  Widget _destinationStaticRow() {
+    final label = ref.watch(rideRequestProvider).destinationLabel;
+    return GestureDetector(
+      onTap: () => setState(() {
+        _pickupMode = false;
+        _controller.clear();
+        _predictions = [];
+      }),
+      child: Container(
+        height: 56,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: BoxDecoration(
+          color: AppColors.field,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.search, size: 22, color: AppColors.muted),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                label.isEmpty ? 'Destination' : label,
+                style: TextStyle(
+                    fontSize: 17,
+                    color: label.isEmpty ? AppColors.muted : AppColors.dark),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -258,8 +376,14 @@ class _DestinationScreenState extends ConsumerState<DestinationScreen> {
       separatorBuilder: (_, _) => const Divider(height: 1, color: AppColors.line),
       itemBuilder: (context, i) {
         final p = _predictions[i];
-        return _row(Icons.location_on_outlined, p.primary, p.secondary,
-            () => _goToSearching(placeId: p.placeId, label: p.primary));
+        return _row(
+          Icons.location_on_outlined,
+          p.primary,
+          p.secondary,
+          _pickupMode
+              ? () => _selectPickup(placeId: p.placeId, label: p.primary)
+              : () => _goToSearching(placeId: p.placeId, label: p.primary),
+        );
       },
     );
   }

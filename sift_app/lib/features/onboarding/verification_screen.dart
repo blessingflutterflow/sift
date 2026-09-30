@@ -28,9 +28,10 @@ class _VerificationScreenState extends ConsumerState<VerificationScreen> {
   final _controller = TextEditingController();
   _CodeChannel _channel = _CodeChannel.sms;
 
-  // Default to United Kingdom; the compact picker opens the full list.
-  String _flag = '🇬🇧';
-  String _dialCode = '44';
+  // Default to South Africa (Sift's launch market); the compact picker opens
+  // the full list for anyone abroad.
+  String _flag = '🇿🇦';
+  String _dialCode = '27';
   bool _sending = false;
 
   bool get _canContinue => _controller.text.trim().length >= 6;

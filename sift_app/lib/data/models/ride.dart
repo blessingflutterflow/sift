@@ -23,6 +23,29 @@ enum RideStatus {
       );
 }
 
+/// A waypoint between pickup and the final destination on a multi-stop trip.
+class RideStop {
+  const RideStop(this.latLng, this.label);
+  final LatLng latLng;
+  final String label;
+
+  Map<String, dynamic> toMap() => {
+        'lat': latLng.latitude,
+        'lng': latLng.longitude,
+        'label': label,
+      };
+
+  static RideStop? fromMap(Object? m) {
+    if (m is! Map) return null;
+    final lat = m['lat'], lng = m['lng'];
+    if (lat is! num || lng is! num) return null;
+    return RideStop(
+      LatLng(lat.toDouble(), lng.toDouble()),
+      (m['label'] ?? '').toString(),
+    );
+  }
+}
+
 class Ride {
   const Ride({
     required this.id,
@@ -33,6 +56,7 @@ class Ride {
     required this.pickupAddress,
     required this.destination,
     required this.destinationLabel,
+    this.stops = const [],
     required this.tierId,
     required this.tierName,
     required this.fare,
@@ -73,6 +97,10 @@ class Ride {
   final String pickupAddress;
   final LatLng destination;
   final String destinationLabel;
+
+  /// Intermediate stops between pickup and [destination] (empty = single-leg
+  /// trip). The full route is pickup → stops → destination.
+  final List<RideStop> stops;
   final String tierId;
   final String tierName;
   final double fare;
@@ -145,6 +173,7 @@ class Ride {
     required String tierName,
     required double fare,
     required double distanceKm,
+    List<RideStop> stops = const [],
     String paymentMethod = 'cash',
     DateTime? scheduledFor,
   }) {
@@ -158,6 +187,7 @@ class Ride {
       'destLat': destination.latitude,
       'destLng': destination.longitude,
       'destLabel': destinationLabel,
+      'stops': stops.map((s) => s.toMap()).toList(),
       'tierId': tierId,
       'tierName': tierName,
       'fare': fare,
@@ -186,6 +216,10 @@ class Ride {
       pickupAddress: m['pickupAddress'] as String? ?? '',
       destination: LatLng(d('destLat'), d('destLng')),
       destinationLabel: m['destLabel'] as String? ?? '',
+      stops: ((m['stops'] as List?) ?? const [])
+          .map(RideStop.fromMap)
+          .whereType<RideStop>()
+          .toList(),
       tierId: m['tierId'] as String? ?? 'bolt',
       tierName: m['tierName'] as String? ?? 'Bolt',
       fare: d('fare'),

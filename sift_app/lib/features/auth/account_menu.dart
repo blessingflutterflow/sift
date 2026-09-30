@@ -1,61 +1,47 @@
-import 'package:cloud_functions/cloud_functions.dart';
+import 'dart:io';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../core/router/app_router.dart';
 import '../../core/theme/app_colors.dart';
 import '../../data/services/biometric_service.dart';
+import '../../data/services/storage_service.dart';
 import 'session_controller.dart';
 
-/// Confirm + execute account deletion via the `deleteAccount` callable.
-/// Profile, cards and places are removed server-side; trip records remain
-/// for accounting.
-Future<void> _confirmDeleteAccount(BuildContext context, WidgetRef ref) async {
-  final yes = await showDialog<bool>(
-    context: context,
-    builder: (dialogContext) => AlertDialog(
-      backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      title: const Text('Delete your account?',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-      content: const Text(
-          'This permanently removes your profile, saved cards and places. '
-          'Trip records are kept for accounting. This cannot be undone.'),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext, false),
-          child: const Text('Keep my account',
-              style: TextStyle(color: AppColors.muted)),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext, true),
-          child: const Text('Delete',
-              style: TextStyle(
-                  color: Color(0xFFE0524D), fontWeight: FontWeight.w700)),
-        ),
-      ],
-    ),
-  );
-  if (yes != true || !context.mounted) return;
+/// Live profile photo URL for the signed-in user (empty/null = no photo yet).
+final profilePhotoProvider = StreamProvider<String?>((ref) {
+  final uid = ref.watch(sessionProvider).uid;
+  if (uid == null) return Stream.value(null);
+  return FirebaseFirestore.instance
+      .collection('users')
+      .doc(uid)
+      .snapshots()
+      .map((d) => d.data()?['photoUrl'] as String?);
+});
 
+/// Pick a new profile picture, upload it, and save the URL on the user doc.
+Future<void> changeProfilePhoto(BuildContext context, WidgetRef ref) async {
+  final uid = ref.read(sessionProvider).uid;
+  if (uid == null) return;
+  final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery, imageQuality: 75, maxWidth: 800);
+  if (picked == null) return;
   try {
-    await FirebaseFunctions.instanceFor(region: 'europe-west1')
-        .httpsCallable('deleteAccount')
-        .call<Map<dynamic, dynamic>>({});
-    await ref.read(sessionProvider.notifier).signOut();
-    if (context.mounted) context.go(AppRouter.verification);
-  } on FirebaseFunctionsException catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(e.code == 'failed-precondition'
-              ? 'Finish or cancel your active trip first.'
-              : 'Could not delete your account. Try again.')));
-    }
+    final url = await ref
+        .read(storageServiceProvider)
+        .uploadProfilePhoto(uid: uid, file: File(picked.path));
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .set({'photoUrl': url}, SetOptions(merge: true));
   } catch (_) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Could not delete your account. Try again.')));
+          content: Text('Could not update your photo. Try again.')));
     }
   }
 }
@@ -137,27 +123,70 @@ Future<void> showAccountMenu(BuildContext context, WidgetRef ref) {
   return showModalBottomSheet<void>(
     context: context,
     backgroundColor: Colors.white,
+    // Tall on small screens (driver + rider have many options) — let the sheet
+    // grow and scroll so nothing (e.g. Sign out) gets clipped off the bottom.
+    isScrollControlled: true,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
     builder: (sheetContext) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(height: 12),
-          Container(
-            width: 44,
-            height: 5,
-            decoration: BoxDecoration(
-              color: const Color(0xFFE6E6E8),
-              borderRadius: BorderRadius.circular(10),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(sheetContext).size.height * 0.85,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 44,
+              height: 5,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE6E6E8),
+                borderRadius: BorderRadius.circular(10),
+              ),
             ),
-          ),
-          const SizedBox(height: 16),
+            const SizedBox(height: 8),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                padding: EdgeInsets.zero,
+                children: [
           ListTile(
-            leading: const CircleAvatar(
-              backgroundColor: AppColors.field,
-              child: Icon(Icons.person, color: AppColors.muted),
+            leading: Consumer(
+              builder: (context, avatarRef, _) {
+                final photo = avatarRef.watch(profilePhotoProvider).value;
+                final hasPhoto = photo != null && photo.isNotEmpty;
+                return GestureDetector(
+                  onTap: () => changeProfilePhoto(context, ref),
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      CircleAvatar(
+                        backgroundColor: AppColors.field,
+                        backgroundImage:
+                            hasPhoto ? NetworkImage(photo) : null,
+                        child: hasPhoto
+                            ? null
+                            : const Icon(Icons.person, color: AppColors.muted),
+                      ),
+                      Positioned(
+                        right: -2,
+                        bottom: -2,
+                        child: Container(
+                          padding: const EdgeInsets.all(3),
+                          decoration: const BoxDecoration(
+                            color: AppColors.green,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.camera_alt,
+                              size: 11, color: Colors.white),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
             title: Text(
               session.name.isEmpty ? 'Your account' : session.name,
@@ -250,6 +279,16 @@ Future<void> showAccountMenu(BuildContext context, WidgetRef ref) {
             },
           ),
           ListTile(
+            leading:
+                const Icon(Icons.support_agent_outlined, color: AppColors.dark),
+            title: const Text('Help & Support',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+            onTap: () {
+              Navigator.pop(sheetContext);
+              context.push(AppRouter.support);
+            },
+          ),
+          ListTile(
             leading: const Icon(Icons.logout, color: Color(0xFFE0524D)),
             title: const Text('Sign out',
                 style: TextStyle(color: Color(0xFFE0524D))),
@@ -259,18 +298,12 @@ Future<void> showAccountMenu(BuildContext context, WidgetRef ref) {
               if (context.mounted) context.go(AppRouter.verification);
             },
           ),
-          ListTile(
-            leading: const Icon(Icons.delete_forever_outlined,
-                color: AppColors.muted),
-            title: const Text('Delete account',
-                style: TextStyle(color: AppColors.muted, fontSize: 14)),
-            onTap: () {
-              Navigator.pop(sheetContext);
-              _confirmDeleteAccount(context, ref);
-            },
-          ),
-          const SizedBox(height: 8),
-        ],
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     ),
   );

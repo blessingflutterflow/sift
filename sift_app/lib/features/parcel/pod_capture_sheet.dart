@@ -81,7 +81,10 @@ class _PodCaptureState extends State<_PodCapture> {
     if (picked != null && mounted) setState(() => _photo = File(picked.path));
   }
 
-  bool get _valid => _photo != null && _sig.isNotEmpty;
+  // The recipient's signature is the required proof. A delivery photo is
+  // encouraged but optional — a failed/blank camera must never block a driver
+  // from completing the drop-off.
+  bool get _valid => _sig.isNotEmpty;
 
   Future<void> _confirm() async {
     if (!_valid || _busy) return;
@@ -89,11 +92,13 @@ class _PodCaptureState extends State<_PodCapture> {
     try {
       final storage = widget.ref.read(storageServiceProvider);
       final sigBytes = await _sig.toPngBytes();
-      final photoUrl = await storage.uploadParcelPhoto(
-        parcelId: widget.parcelId,
-        stopIndex: widget.stopIndex,
-        file: _photo!,
-      );
+      final photoUrl = _photo != null
+          ? await storage.uploadParcelPhoto(
+              parcelId: widget.parcelId,
+              stopIndex: widget.stopIndex,
+              file: _photo!,
+            )
+          : '';
       final sigUrl = await storage.uploadParcelSignature(
         parcelId: widget.parcelId,
         stopIndex: widget.stopIndex,
@@ -104,10 +109,31 @@ class _PodCaptureState extends State<_PodCapture> {
             context, PodResult(photoUrl, sigUrl, _name.text.trim()));
       }
     } catch (_) {
-      if (mounted) {
-        setState(() => _busy = false);
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Could not save proof of delivery. Try again.')));
+      // The upload failed (no connection / Storage blocked). Never trap the
+      // driver on a delivery they've actually made — offer to record it
+      // without the uploaded proof so the parcel can still complete.
+      if (!mounted) return;
+      setState(() => _busy = false);
+      final anyway = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text("Couldn't upload proof"),
+          content: const Text(
+              'The signature/photo could not be uploaded — usually a '
+              'connection problem. Record this delivery anyway so the job can '
+              'be completed?'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(c, false),
+                child: const Text('Try again')),
+            TextButton(
+                onPressed: () => Navigator.pop(c, true),
+                child: const Text('Record anyway')),
+          ],
+        ),
+      );
+      if (anyway == true && mounted) {
+        Navigator.pop(context, PodResult('', '', _name.text.trim()));
       }
     }
   }
@@ -152,7 +178,7 @@ class _PodCaptureState extends State<_PodCapture> {
                           Icon(Icons.camera_alt_outlined,
                               size: 32, color: AppColors.muted),
                           SizedBox(height: 6),
-                          Text('Tap to take a delivery photo',
+                          Text('Tap to add a delivery photo (optional)',
                               style: TextStyle(color: AppColors.muted)),
                         ],
                       ),

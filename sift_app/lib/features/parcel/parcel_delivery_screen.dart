@@ -69,11 +69,21 @@ class _ParcelDeliveryScreenState extends ConsumerState<ParcelDeliveryScreen> {
     );
   }
 
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: const Color(0xFFE0524D),
+    ));
+  }
+
   Future<void> _pickUp() async {
     setState(() => _busy = true);
     try {
       await ref.read(parcelRepositoryProvider).markPickedUp(widget.parcelId);
-    } catch (_) {} finally {
+    } catch (e) {
+      _toast('Could not mark picked up. Check your connection and try again.');
+    } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -97,7 +107,9 @@ class _ParcelDeliveryScreenState extends ConsumerState<ParcelDeliveryScreen> {
             podSignatureUrl: pod.signatureUrl,
             receivedBy: pod.receivedBy,
           );
-    } catch (_) {} finally {
+    } catch (e) {
+      _toast('Could not record this delivery. Please try again.');
+    } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -108,7 +120,9 @@ class _ParcelDeliveryScreenState extends ConsumerState<ParcelDeliveryScreen> {
     setState(() => _busy = true);
     try {
       await ref.read(parcelRepositoryProvider).failStop(p.id, stopIndex, reason);
-    } catch (_) {} finally {
+    } catch (e) {
+      _toast('Could not update this drop-off. Please try again.');
+    } finally {
       if (mounted) setState(() => _busy = false);
     }
   }

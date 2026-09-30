@@ -10,6 +10,44 @@ const admin = require("firebase-admin");
 const REGION = "europe-west1";
 const ACTIVE = ["requested", "accepted", "arriving", "arrived", "in_progress"];
 
+/**
+ * Save the signed-in user's profile (name, email, role, phone) server-side.
+ *
+ * The app used to write this straight to Firestore from the client, but a
+ * flaky/blocked client write left accounts with no name/role — they showed as
+ * "Unnamed / Unknown" in admin. Writing it via the Admin SDK here is reliable
+ * (no client offline hang, no rules/App-Check surprise), so the name always
+ * lands. enforceAppCheck:false matches the OTP flow during the testing phase.
+ */
+exports.saveProfile = onCall(
+  { region: REGION, enforceAppCheck: false },
+  async (req) => {
+    const uid = req.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign in required.");
+    const db = admin.firestore();
+    const d = req.data || {};
+
+    const name = String(d.name || "").trim();
+    const email = String(d.email || "").trim();
+    const phone = String(d.phone || "").trim();
+    const role = d.role === "rider" || d.role === "driver" ? d.role : null;
+
+    const patch = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
+    if (name) patch.name = name;
+    if (email) patch.email = email;
+    if (phone) patch.phone = phone;
+    if (role) {
+      patch.role = role;
+      // Riders are usable immediately; drivers stay 'none' until docs are
+      // reviewed. Never downgrade an already-approved account.
+      if (role === "rider") patch.status = "approved";
+    }
+
+    await db.collection("users").doc(uid).set(patch, { merge: true });
+    return { ok: true };
+  }
+);
+
 exports.deleteAccount = onCall({ region: REGION }, async (req) => {
   const uid = req.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Sign in required.");

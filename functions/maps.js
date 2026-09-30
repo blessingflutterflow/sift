@@ -18,29 +18,43 @@ function requireAuth(req) {
 
 const isNum = (v) => typeof v === "number" && Number.isFinite(v);
 
-/** Directions: origin → destination. Returns the encoded overview polyline. */
+/** Directions: origin → destination, optionally via ordered waypoints (stops).
+ *  Returns the encoded overview polyline + total distance/duration across every
+ *  leg, so a multi-stop trip is priced and drawn end-to-end. */
 exports.getRoute = onCall(
   { region: REGION, secrets: [MAPS_API_KEY] },
   async (req) => {
     requireAuth(req);
-    const { oLat, oLng, dLat, dLng } = req.data || {};
+    const { oLat, oLng, dLat, dLng, waypoints } = req.data || {};
     if (![oLat, oLng, dLat, dLng].every(isNum)) {
       throw new HttpsError("invalid-argument", "origin/destination required.");
+    }
+    // Ordered stops between origin and destination → &waypoints=lat,lng|lat,lng
+    let wpParam = "";
+    if (Array.isArray(waypoints) && waypoints.length) {
+      const parts = waypoints
+        .filter((w) => w && isNum(w.lat) && isNum(w.lng))
+        .map((w) => `${w.lat},${w.lng}`);
+      if (parts.length) wpParam = `&waypoints=${parts.join("|")}`;
     }
     const url =
       `https://maps.googleapis.com/maps/api/directions/json` +
       `?origin=${oLat},${oLng}&destination=${dLat},${dLng}` +
+      wpParam +
       `&key=${MAPS_API_KEY.value()}`;
     try {
       const res = await fetch(url);
       const data = await res.json();
       const route = data.routes?.[0];
-      const leg = route?.legs?.[0];
-      if (!route || !leg) return { points: null };
+      const legs = route?.legs || [];
+      if (!route || !legs.length) return { points: null };
+      // Sum every leg so distance/duration cover the whole multi-stop route.
+      const meters = legs.reduce((a, l) => a + (l.distance?.value ?? 0), 0);
+      const seconds = legs.reduce((a, l) => a + (l.duration?.value ?? 0), 0);
       return {
         points: route.overview_polyline?.points ?? null,
-        distanceKm: (leg.distance?.value ?? 0) / 1000,
-        durationMin: Math.round((leg.duration?.value ?? 0) / 60),
+        distanceKm: meters / 1000,
+        durationMin: Math.round(seconds / 60),
       };
     } catch (e) {
       logger.warn("getRoute failed", e?.message);

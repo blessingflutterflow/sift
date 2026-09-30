@@ -33,6 +33,7 @@ const REGION = "europe-west1";
 const OFFER_SECONDS = 15;
 const MAX_CANDIDATES = 6;
 const MAX_RADIUS_KM = 20;
+const STALE_MS = 3 * 60 * 1000; // ignore drivers not seen in 3 min (app heartbeats every 40s)
 const ACTIVE = ["accepted", "arriving", "arrived", "in_progress"];
 
 const db = () => admin.firestore();
@@ -49,8 +50,11 @@ function haversineKm(a, b) {
   return 2 * R * Math.asin(Math.sqrt(x));
 }
 
-/** Ranked uids of online, non-busy drivers within range of the pickup. */
-async function rankCandidates(pickup) {
+/** Ranked uids of online, non-busy drivers within range of the pickup.
+ *  `radiusKm` is the admin-configured dispatch radius (falls back to 20).
+ *  `wantCategory` (e.g. the ride tier) restricts to drivers of that category;
+ *  drivers with no category assigned are eligible for everything. */
+async function rankCandidates(pickup, radiusKm = MAX_RADIUS_KM, wantCategory = null) {
   const [online, active] = await Promise.all([
     db().collection("driver_locations").where("online", "==", true).get(),
     ridesRef().where("status", "in", ACTIVE).get(),
@@ -64,8 +68,17 @@ async function rankCandidates(pickup) {
     const x = doc.data();
     if (busy.has(doc.id)) return;
     if (typeof x.lat !== "number" || typeof x.lng !== "number") return;
+    // Skip "ghost online" drivers — an app that died without going offline
+    // leaves online:true forever. A live driver heartbeats every ~40s, so
+    // anything not seen in a few minutes isn't really available.
+    const seen = x.updatedAt?.toMillis?.() ?? 0;
+    if (Date.now() - seen > STALE_MS) return;
+    // Category gate: an assigned driver only gets their category's requests.
+    // Unassigned drivers (no category) remain eligible for all, so existing
+    // drivers keep working until an admin categorises them.
+    if (wantCategory && x.category && x.category !== wantCategory) return;
     const dist = haversineKm(pickup, { lat: x.lat, lng: x.lng });
-    if (dist <= MAX_RADIUS_KM) {
+    if (dist <= radiusKm) {
       cands.push({ uid: doc.id, dist, lat: x.lat, lng: x.lng });
     }
   });
@@ -131,6 +144,7 @@ async function offerNext(rideId) {
  */
 async function beginDispatch(rideRef, ride) {
   const rideId = rideRef.id;
+  let radiusKm = MAX_RADIUS_KM;
 
   // Stamp authoritative rider display info + server-computed fare. The
   // client's submitted `fare` is treated as a preview only; the number that
@@ -150,6 +164,7 @@ async function beginDispatch(rideRef, ride) {
     }
     // Surge from the pickup's zone (or the city-wide default) folds into fare.
     const surge = surgeForPoint(ride.pickupLat, ride.pickupLng, zones, cfg);
+    if (Number(cfg.dispatchRadiusKm) > 0) radiusKm = Number(cfg.dispatchRadiusKm);
     const quotedFare = computeFare(ride.distanceKm, ride.tierId, cfg, surge);
     await rideRef.update({
       riderName: ud.name || "Rider",
@@ -165,10 +180,11 @@ async function beginDispatch(rideRef, ride) {
     logger.warn("rider profile/fare stamp failed", e);
   }
 
-  const candidates = await rankCandidates({
-    lat: ride.pickupLat,
-    lng: ride.pickupLng,
-  });
+  const candidates = await rankCandidates(
+    { lat: ride.pickupLat, lng: ride.pickupLng },
+    radiusKm,
+    ride.tierId || null
+  );
 
   if (candidates.length === 0) {
     await rideRef.update({

@@ -72,10 +72,26 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // support_threads/{uid} — in-app support chat. The user owns their thread;
+    // the admin replies via the Admin SDK (rules bypassed). Thread id == uid.
+    match /support_threads/{uid} {
+      allow read, write: if isOwner(uid) || isAdmin();
+      match /messages/{messageId} {
+        allow read: if isOwner(uid) || isAdmin();
+        allow create: if isOwner(uid);
+      }
+    }
+
     // driver_locations/{uid} — live GPS the driver writes while online.
+    // A blocked driver cannot mark themselves online (defense-in-depth: the
+    // client also refuses + kicks them offline). Going offline is always OK.
+    // NOTE: use .get('blocked', false) — reading a missing field directly
+    // errors in rules and would deny every write for users without the field.
     match /driver_locations/{uid} {
-      allow read: if isAdmin();
-      allow write: if isOwner(uid);
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if isOwner(uid)
+        && !(request.resource.data.online == true
+             && get(/databases/$(database)/documents/users/$(uid)).data.get('blocked', false) == true);
     }
 
     // rides/{rideId} — shared ride contract.
@@ -90,9 +106,15 @@ service cloud.firestore {
     match /rides/{rideId} {
       allow read: if isSignedIn();
 
+      // A blocked rider cannot create a ride/parcel request at all. Using
+      // .get('blocked', false) so a user doc without the field still passes
+      // (missing == not blocked). This is the hard stop; the dispatch function
+      // also refuses, and the app shows a friendly "account blocked" message.
       allow create: if isSignedIn()
         && request.resource.data.riderId == request.auth.uid
-        && request.resource.data.status in ['requested', 'scheduled'];
+        && request.resource.data.status in ['requested', 'scheduled']
+        && get(/databases/$(database)/documents/users/$(request.auth.uid))
+             .data.get('blocked', false) == false;
 
       allow update: if isSignedIn() && (
         (
@@ -145,9 +167,12 @@ service cloud.firestore {
     // fields are written by the Cloud Functions (Admin SDK) / admins only.
     match /parcels/{parcelId} {
       allow read: if isSignedIn();
+      // Same block as rides: a blocked sender can't open a parcel request.
       allow create: if isSignedIn()
         && request.resource.data.senderId == request.auth.uid
-        && request.resource.data.status == 'requested';
+        && request.resource.data.status == 'requested'
+        && get(/databases/$(database)/documents/users/$(request.auth.uid))
+             .data.get('blocked', false) == false;
       allow update: if isSignedIn()
         && resource.data.driverId == request.auth.uid
         && changedKeys().hasOnly([
@@ -197,6 +222,27 @@ service cloud.firestore {
     match /zones/{zoneId} {
       allow read: if isSignedIn();
       allow write: if isAdmin();
+    }
+
+    // announcements/{id} — admin broadcasts shown full-screen in the app.
+    // Composed/toggled by admins (Admin SDK). Broadcasts (all_drivers /
+    // all_riders / everyone) are readable by any signed-in user; an
+    // individually-targeted ('specific') one is readable only by a listed
+    // recipient (or admin) so a private message isn't visible to everyone. The
+    // app's two queries (audience whereIn / targetUids array-contains) each
+    // satisfy exactly one branch. Users record their own dismissal under
+    // reads/{uid} — that (and only that) they may create.
+    match /announcements/{annId} {
+      allow read: if isSignedIn() && (
+        resource.data.get('audience', 'all_drivers') != 'specific'
+        || request.auth.uid in resource.data.get('targetUids', [])
+        || isAdmin()
+      );
+      allow write: if isAdmin();
+      match /reads/{uid} {
+        allow read: if isOwner(uid) || isAdmin();
+        allow create: if isOwner(uid);
+      }
     }
 
     // otp_throttle/{phone} — server-only rate-limit state (Admin SDK).
